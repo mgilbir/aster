@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strings"
 	"unsafe"
 
 	ecma262 "github.com/mgilbir/goecma262"
@@ -202,36 +201,8 @@ func satAdd(a, b int64) int64 {
 // quotes the first 64 characters of the source and 16 of the flags, as each
 // may be a megabyte long.
 func patternError(source, flags string, err error) error {
-	return fmt.Errorf("invalid regular expression /%.64s/%.16s: %w", source, flags, unnamedDuplicate(err))
+	return fmt.Errorf("invalid regular expression /%.64s/%.16s: %w", source, flags, err)
 }
-
-// duplicateGroupName is the text goecma262's parser gives a capture group
-// name used twice on one match path, followed by a name.
-const duplicateGroupName = "duplicate group name: "
-
-// unnamedDuplicate drops the name from goecma262's duplicate group name
-// error. The parser names the first duplicate it finds by ranging over a Go
-// map, so a pattern with several (`(?<a>)(?<b>)(?<a>)(?<b>)`) is reported
-// with any of them, a different one from run to run. V8 names none:
-// `new RegExp` throws "Duplicate capture group name". The message is one
-// text for every such pattern, and the error still wraps err.
-func unnamedDuplicate(err error) error {
-	msg := err.Error()
-	i := strings.LastIndex(msg, duplicateGroupName)
-	if i < 0 || strings.ContainsAny(msg[i+len(duplicateGroupName):], " \n") {
-		return err
-	}
-	return namedError{msg: msg[:i+len(duplicateGroupName)-len(": ")], err: err}
-}
-
-// namedError is an error with a message of its own that wraps err.
-type namedError struct {
-	msg string
-	err error
-}
-
-func (e namedError) Error() string { return e.msg }
-func (e namedError) Unwrap() error { return e.err }
 
 // Bytes is what p holds: the compiled pattern as goecma262 measures it
 // (its program, what the instructions own, its source and group names) and

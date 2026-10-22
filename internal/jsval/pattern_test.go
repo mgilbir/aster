@@ -563,32 +563,33 @@ func TestPatternFlagsCostIsNotSizedByTheFlags(t *testing.T) {
 }
 
 // A pattern with several capture group names used twice on one match path is
-// refused with one message however often it is compiled: goecma262 names the
-// first duplicate it finds by ranging over a map, so NewPattern leaves the
-// name out, as V8 does ("Duplicate capture group name"). A name reused only
-// in different alternatives is allowed, as in node 24 (ES2025).
+// refused with one message however often it is compiled, naming the name
+// redefined earliest in the source, as goecma262 v0.3.3 does (it had named
+// whichever duplicate a map iteration met first, a different one from run
+// to run). A name reused only in different alternatives is allowed, as in
+// node 24 (ES2025).
 func TestNewPatternDuplicateGroupNames(t *testing.T) {
-	const want = "invalid regular expression /%s/: parse error: duplicate group name"
+	const want = "invalid regular expression /%s/: parse error: duplicate group name: %s"
 	for _, c := range []struct {
-		src string
-		bad bool
+		src, dup string // dup: the name reported, "" for a pattern node 24 accepts
 	}{
-		{"(?<A0>)(?<A>)(((?<A0>)(?<A>))0)", true},
-		{"(?<a>)(?<b>)(?<a>)(?<b>)", true},
-		{"(?<a>)(?<b>)(?<c>)(?<a>)(?<b>)(?<c>)", true},
-		{"(?<a>(?<b>)(?<c>))(?<c>)(?<b>)(?<a>)", true},
-		{"(?:(?<a>)(?<b>))(?:(?<b>)(?<a>))", true},
-		{"(?<a>(?<a>))", true},
-		{"(?=(?<a>)(?<b>))(?<b>)(?<a>)", true},
-		{"(?<a>)(?<b>)(?:(?<a>)|(?<b>))", true},
-		{"(?<a>x)|(?<a>y)", false},
-		{"(?:(?<a>x)|(?<a>y))(?<b>)|(?<b>)(?:(?<a>)|(?<a>))", false},
-		{"(?:(?<a>x)|(?<a>y))(?<a>z)", true},
+		{"(?<A0>)(?<A>)(((?<A0>)(?<A>))0)", "A0"},
+		{"(?<a>)(?<b>)(?<a>)(?<b>)", "a"},
+		{"(?<a>)(?<b>)(?<c>)(?<a>)(?<b>)(?<c>)", "a"},
+		{"(?<a>(?<b>)(?<c>))(?<c>)(?<b>)(?<a>)", "c"},
+		{"(?:(?<a>)(?<b>))(?:(?<b>)(?<a>))", "b"},
+		{"(?<a>(?<a>))", "a"},
+		{"(?=(?<a>)(?<b>))(?<b>)(?<a>)", "b"},
+		{"(?<a>)(?<b>)(?:(?<a>)|(?<b>))", "a"},
+		{"(?<a>x)|(?<a>y)", ""},
+		{"(?:(?<a>x)|(?<a>y))(?<b>)|(?<b>)(?:(?<a>)|(?<a>))", ""},
+		{"(?:(?<a>x)|(?<a>y))(?<a>z)", "a"},
 	} {
+		bad := c.dup != ""
 		first := ""
 		for i := 0; i < 50; i++ {
 			p, err := NewPattern(context.Background(), c.src, "", func(int64) error { return nil })
-			if !c.bad {
+			if !bad {
 				if err != nil || p == nil {
 					t.Fatalf("/%s/: %v, node 24 accepts it", c.src, err)
 				}
@@ -599,7 +600,7 @@ func TestNewPatternDuplicateGroupNames(t *testing.T) {
 			}
 			if i == 0 {
 				first = err.Error()
-				if w := fmt.Sprintf(want, c.src); first != w {
+				if w := fmt.Sprintf(want, c.src, c.dup); first != w {
 					t.Fatalf("/%s/: error %q, want %q", c.src, first, w)
 				}
 			} else if err.Error() != first {
