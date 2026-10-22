@@ -245,7 +245,7 @@ What changed between versions, for users of the library and the CLI. Breaking ch
 
 ### Errors
 
-- A regular expression that uses a capture group name twice on one match path is refused with "duplicate group name" and no name, as V8 refuses it ("Duplicate capture group name"); the parser named any one of the duplicates, a different one from run to run.
+- A regular expression that uses a capture group name twice on one match path is refused naming the name redefined earliest in the source ("duplicate group name: a"), the same on every run; the parser (github.com/mgilbir/goecma262, now v0.3.3) named any one of the duplicates, a different one from run to run.
 - A `FallbackLoader` whose children all fail reports every child's failure, in order, each matched by `errors.Is` and `errors.As`; it reported only the last, so a file missing from a `FileLoader` read as the refusal of the `HTTPLoader` after it (C70). One child's failure is still returned as it is.
 - A `FileLoader` read error says that the URL is relative to its `BaseDir` and gives the cause without `os.Root`'s operation name (`statat data/cars.json: no such file or directory`); it still wraps the `*fs.PathError`, and still does not name the directory, since the error reaches whoever wrote the spec.
 
