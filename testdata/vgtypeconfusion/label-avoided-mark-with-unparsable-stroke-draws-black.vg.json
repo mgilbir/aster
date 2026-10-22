@@ -1,0 +1,4 @@
+{"width":100,"height":60,"padding":4,"data":[{"name":"pts","values":[{"x":50,"y":30,"t":"a"}]},{"name":"fit","values":[{"x":0,"y":28},{"x":100,"y":28}]}],
+"marks":[{"name":"trend","type":"line","from":{"data":"fit"},"encode":{"enter":{"x":{"field":"x"},"y":{"field":"y"},"stroke":{"value":"no such colour"},"strokeWidth":{"value":20}}}},
+{"type":"symbol","name":"points","from":{"data":"pts"},"encode":{"enter":{"x":{"field":"x"},"y":{"field":"y"}}}},
+{"type":"text","from":{"data":"points"},"encode":{"enter":{"text":{"field":"datum.t"},"fontSize":{"value":10}}},"transform":[{"type":"label","avoidMarks":["trend"],"size":[100,60]}]}]}
