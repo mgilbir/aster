@@ -303,6 +303,15 @@ func (s *Shape) Path(item jsval.Value) (d string, ok bool) {
 	return d, ok
 }
 
+// DrawString draws the item onto ctx, as Draw does, and returns its SVG path
+// data, as Path does, from one walk of the geometry (Path.DrawString).
+func (s *Shape) DrawString(ctx PathContext, item jsval.Value) (d string, ok bool) {
+	s.path.SetContext(ctx)
+	s.withRadius(func() { d, ok = s.path.DrawString(s.field(item)) })
+	s.path.SetContext(nil)
+	return d, ok
+}
+
 // Draw draws the item onto ctx.
 func (s *Shape) Draw(ctx PathContext, item jsval.Value) {
 	s.path.SetContext(ctx)

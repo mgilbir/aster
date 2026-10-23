@@ -101,13 +101,25 @@ func init() {
 			if as == "" {
 				as = "shape"
 			}
+			// An item's bounds draw its shape, and the SVG writer then asks
+			// for its path data: both come from one walk of the geometry
+			// (Shape.DrawString), the text kept for the writer as long as
+			// the item holds the datum it was drawn for.
+			texts := map[*scene.Item]shapeText{}
 			fn := func(ctx scene.PathContext, it *scene.Item) string {
 				obj := jsval.Obj(jsval.ObjectOf("datum", it.Datum))
 				if ctx == nil {
+					if t, ok := texts[it]; ok {
+						delete(texts, it)
+						if jsval.StrictEqual(t.datum, it.Datum) {
+							return t.d
+						}
+					}
 					d, _ := shape.Path(obj)
 					return d
 				}
-				shape.Draw(ctx, obj)
+				d, _ := shape.DrawString(ctx, obj)
+				texts[it] = shapeText{datum: it.Datum, d: d}
 				return ""
 			}
 			if pulse.items != nil {
@@ -150,4 +162,11 @@ func pointRadius(p *opParams) geo.PointRadius {
 		return geo.PointRadius{Set: true, Fn: func(o jsval.Value) float64 { return jsval.ToNumber(v.call(o)) }}
 	}
 	return geo.PointRadius{}
+}
+
+// shapeText is the path data a geoshape made for an item as its bounds drew
+// it, and the datum it was made from.
+type shapeText struct {
+	datum jsval.Value
+	d     string
 }
