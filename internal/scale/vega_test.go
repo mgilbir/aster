@@ -239,7 +239,7 @@ func runVega(s Scale, loc *format.Locale, tm map[string]any) (jsval.Value, error
 		}
 		return jsval.Arr(out), nil
 	case "scaleFraction":
-		f := ScaleFraction(s, jsval.ToNumber(decVal(tm["min"])), jsval.ToNumber(decVal(tm["max"])))
+		f := ScaleFraction(s, decVal(tm["min"]), decVal(tm["max"]))
 		var out []jsval.Value
 		for _, in := range decVal(tm["inputs"]).Items() {
 			out = append(out, f(in))
