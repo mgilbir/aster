@@ -1,14 +1,14 @@
 # Performance
 
-A render takes milliseconds, and one `Converter` serves a whole process. The figures below are from [RESULTS.md](../internal/cmd/enginebench/RESULTS.md), measured on 2026-10-03 (commit 819a348) on an Apple M1 Pro. Times are medians of repeated runs on a warm engine, compared with upstream Vega 6.4.0 / Vega-Lite 6.4.3 in node 24 on the same specs.
+A render takes milliseconds, and one `Converter` serves a whole process. The figures below are from [RESULTS.md](../internal/cmd/enginebench/RESULTS.md), measured on 2026-10-23 (commit ee3d5769) on a Linux x86-64 machine with an AMD Ryzen 9 6900HX. Times are medians of repeated runs on a warm engine, compared with upstream Vega 6.4.0 / Vega-Lite 6.4.3 in node 24.21.0 on the same specs, and the lowest of three alternating rounds per engine. The run before it, on an Apple M1 Pro at 819a348 (2026-10-03), measured a 3.5× speedup to SVG and 2.1× to PNG; between the two, the audit fixes made the parse stage slower and the follow-ups took part of that back.
 
 | Workload (627 Vega-Lite examples) | aster, geometric mean | node 24 | speedup |
 |---|---:|---:|---:|
-| Vega-Lite → Vega | 0.30 ms | 0.52 ms | 1.7× |
-| spec → SVG | 1.92 ms | 6.62 ms | 3.5× |
-| spec → PNG | 7.17 ms | 14.8 ms | 2.1× |
+| Vega-Lite → Vega | 0.39 ms | 0.67 ms | 1.7× |
+| spec → SVG | 2.35 ms | 6.20 ms | 2.6× |
+| spec → PNG | 7.07 ms | 12.4 ms | 1.8× |
 
-A new `Converter` with the embedded fonts costs almost nothing: they load on first use, and the first bar chart after `New` took 9.4 ms. Fonts you register are loaded by `New` instead. Peak RSS over the whole benchmark was 270 MB for aster and 1,025 MB for node. The QuickJS-in-WebAssembly engine earlier versions used was 13–62× slower than this one; see [ADR 0001](adr/0001-pure-go-engine.md).
+A new `Converter` with the embedded fonts costs almost nothing: they load on first use, and the first bar chart after `New` took 7.9 ms. Fonts you register are loaded by `New` instead. Peak RSS over the whole benchmark was 320 MB for aster and 6,432 MB for node (1,025 MB for node on the M1 Pro). The QuickJS-in-WebAssembly engine earlier versions used was 13–62× slower than this one; see [ADR 0001](adr/0001-pure-go-engine.md).
 
 `internal/cmd/enginebench` reproduces these numbers ([how](../internal/cmd/enginebench/README.md)). On your own charts, `ASTER_PERF=1 go test -run TestPerfReport -v .` breaks a render down by stage (json, compile, parse, dataflow, text, svg, png, pdf).
 
@@ -16,7 +16,7 @@ A new `Converter` with the embedded fonts costs almost nothing: they load on fir
 
 A `Converter` is safe for concurrent use by any number of goroutines. Each call renders on state of its own, and what calls share (fonts and their shaping caches, locales, colour schemes, compiled expressions) is immutable or synchronised. A `Loader` passed to `WithLoader` is called from several goroutines at once and must be safe for that; the package's own loaders are.
 
-Throughput of a mixed SVG workload (`BenchmarkParallel`, renders per second, median of five runs, 10 cores):
+Throughput of a mixed SVG workload (`BenchmarkParallel`, renders per second, median of five runs, 10 cores of the Apple M1 Pro, 2026-10-03):
 
 | Goroutines | 1 | 4 | 10 |
 |---|---|---|---|
