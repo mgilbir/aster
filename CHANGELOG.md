@@ -259,6 +259,7 @@ Output is byte for byte what it was.
 - A call no longer reads its goroutine's id from a stack trace unless the `Converter` has custom projections, whose functions run on the call's goroutine without the callback boundary that marks the others (a few microseconds a call: rendering an empty Vega specification takes 46 µs instead of 52 µs).
 - A date's text (`String(date)`: the keys of an aggregate, a stack or a join grouped by a date, and dates in labels and values) is written into the text it is part of, instead of being built from a dozen small strings: charts grouped by month allocate about half as often (the Vega-Lite example of bars by month, 53,238 allocations to 20,318) and render 10–20% faster.
 - A geoshape's bounds and its SVG path come from one walk of its geometry through the projection (rotation, clipping, resampling) instead of two: maps render 20–30% faster (the gallery's county unemployment map in 108 ms instead of 151 ms, the Vega-Lite choropleth in 144 ms instead of 187 ms).
+- Encoding references whose generated source cannot fail to parse skip compiling that source: a signal whose expression parses on its own, a scale with a numeric `range`, an `offset` or `mult` that is itself such a reference, a group or parent field named by a plain identifier, alongside the literal values and plain fields that already did. The parse stage of a specification of twenty small views takes 8% less time and allocates 6% less.
 
 ## v0.2.0 (2026-10-14)
 
