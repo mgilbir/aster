@@ -52,7 +52,13 @@ type Result struct {
 	// differing element/attribute sites (capped).
 	Elements  int
 	DiffCount int
+	// Sites are the differences, each as Diff gives the first ("path:
+	// what"), the first maxSites of them.
+	Sites []string
 }
+
+// maxSites bounds Result.Sites.
+const maxSites = 256
 
 type node struct {
 	name     string
@@ -86,7 +92,7 @@ func Compare(got, want []byte, opts Options) (Result, error) {
 		c.ignore[a] = true
 	}
 	c.node(g, w, "", false)
-	return Result{Equal: c.count == 0, Diff: c.first, Elements: c.elements, DiffCount: c.count}, nil
+	return Result{Equal: c.count == 0, Diff: c.first, Elements: c.elements, DiffCount: c.count, Sites: c.sites}, nil
 }
 
 // maxDepth bounds element nesting in a compared document: the comparison
@@ -164,14 +170,21 @@ type comparer struct {
 	opts     Options
 	ignore   map[string]bool
 	first    string
+	sites    []string
 	count    int
 	elements int
 }
 
 func (c *comparer) report(path, format string, args ...any) {
 	c.count++
-	if c.first == "" {
-		c.first = path + ": " + fmt.Sprintf(format, args...)
+	if c.first == "" || len(c.sites) < maxSites {
+		site := path + ": " + fmt.Sprintf(format, args...)
+		if c.first == "" {
+			c.first = site
+		}
+		if len(c.sites) < maxSites {
+			c.sites = append(c.sites, site)
+		}
 	}
 }
 

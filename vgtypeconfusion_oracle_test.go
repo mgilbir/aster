@@ -265,6 +265,7 @@ func TestVegaTypeConfusionMatchesNode(t *testing.T) {
 		noAns    bool   // node did not answer in time
 		died     string // why node died answering (a fresh process too), when it did
 		hasDeath bool
+		known    string // a documented platform class the difference is (vgknown_oracle_test.go)
 	}
 	jobs := make(chan vgMutant)
 	results := make(chan outcome)
@@ -289,7 +290,13 @@ func TestVegaTypeConfusionMatchesNode(t *testing.T) {
 					results <- outcome{m: m, diff: d, limited: limited, died: died, hasDeath: true}
 					continue
 				}
-				d, limited := vegaMutantDiffers(c, want, m.spec)
+				d, limited, sites, all := vegaMutantCompare(c, want, m.spec)
+				if d != "" {
+					if class := knownPlatformDifference(o, c, m.spec, sites, all); class != "" {
+						results <- outcome{m: m, known: class}
+						continue
+					}
+				}
 				results <- outcome{m: m, diff: d, limited: limited}
 			}
 		}()
@@ -311,6 +318,7 @@ func TestVegaTypeConfusionMatchesNode(t *testing.T) {
 	go func() { wg.Wait(); close(results) }()
 
 	groups := map[string][]outcome{}
+	known := map[string][]outcome{}
 	compared, limited, noAnswer := 0, 0, 0
 	died := map[string]int{} // upstream's failures by the reason node gave
 	for r := range results {
@@ -330,6 +338,10 @@ func TestVegaTypeConfusionMatchesNode(t *testing.T) {
 			continue
 		}
 		compared++
+		if r.known != "" {
+			known[r.known] = append(known[r.known], r)
+			continue
+		}
 		if r.diff == "" {
 			continue
 		}
@@ -339,6 +351,10 @@ func TestVegaTypeConfusionMatchesNode(t *testing.T) {
 	t.Logf("seed %d: %d mutants compared, %d stopped at an engine bound, %d unanswered by node (timed out)", *vgConfusionSeed, compared, limited, noAnswer)
 	for reason, n := range died {
 		t.Logf("seed %d: %d mutants upstream fails on by ending node (%s)", *vgConfusionSeed, n, reason)
+	}
+	for class, g := range known {
+		sort.Slice(g, func(a, b int) bool { return string(g[a].m.spec) < string(g[b].m.spec) })
+		t.Logf("seed %d: %d mutants differ as %s, confirmed and not failed; first: %s (%s)", *vgConfusionSeed, len(g), class, g[0].m.label, filepath.Base(g[0].m.file))
 	}
 	keys := make([]string, 0, len(groups))
 	for k := range groups {
@@ -419,28 +435,35 @@ func vegaMutantPanics(c *aster.Converter, mutant []byte) string {
 // reports a render the engine stopped at one of its bounds, which is not
 // compared.
 func vegaMutantDiffers(c *aster.Converter, want oracle.Result, mutant []byte) (diff string, limited bool) {
+	diff, limited, _, _ = vegaMutantCompare(c, want, mutant)
+	return diff, limited
+}
+
+// vegaMutantCompare is vegaMutantDiffers with the sites of an SVG difference
+// (svgdiff.Result.Sites), and whether they are all of them.
+func vegaMutantCompare(c *aster.Converter, want oracle.Result, mutant []byte) (diff string, limited bool, sites []string, all bool) {
 	got, gerr := c.VegaToSVG(mutant, asUpstream)
 	if gerr != nil && !isEngineBug(gerr) && (errors.Is(gerr, aster.ErrLimit) || errors.Is(gerr, context.DeadlineExceeded)) {
-		return "", true
+		return "", true, nil, false
 	}
 	switch errorOutcome(gerr, want.Err) {
 	case statusInternalError:
-		return fmt.Sprintf("the engine panics (%q)", firstLine(gerr.Error())), false
+		return fmt.Sprintf("the engine panics (%q)", firstLine(gerr.Error())), false, nil, false
 	case "engine-error":
-		return fmt.Sprintf("the engine errors, node renders (%q)", firstLine(gerr.Error())), false
+		return fmt.Sprintf("the engine errors, node renders (%q)", firstLine(gerr.Error())), false, nil, false
 	case "node-error":
-		return fmt.Sprintf("node errors, the engine renders (%q)", firstLine(want.Err)), false
+		return fmt.Sprintf("node errors, the engine renders (%q)", firstLine(want.Err)), false, nil, false
 	case "both-error":
-		return "", false
+		return "", false, nil, false
 	}
 	d, err := svgdiff.Compare([]byte(got), []byte(want.SVG), svgTolerance)
 	switch {
 	case err != nil:
-		return "the SVG differs: " + firstLine(err.Error()), false
+		return "the SVG differs: " + firstLine(err.Error()), false, nil, false
 	case !d.Equal:
-		return fmt.Sprintf("the SVG differs: %d diffs; first: %s", d.DiffCount, firstLine(d.Diff)), false
+		return fmt.Sprintf("the SVG differs: %d diffs; first: %s", d.DiffCount, firstLine(d.Diff)), false, d.Sites, len(d.Sites) == d.DiffCount
 	}
-	return "", false
+	return "", false, nil, false
 }
 
 // TestVegaTypeConfusionRegressionsMatchNode replays the Vega mutants the
