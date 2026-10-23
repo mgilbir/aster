@@ -57,7 +57,7 @@ func scaleGradient(v *runView, s scale.Scale, p0, p1, count jsval.Value) jsval.V
 		ns.SetDomain([]jsval.Value{min, max})
 		s = ns
 	} else {
-		fraction = scale.ScaleFraction(s, jsval.ToNumber(min), jsval.ToNumber(max))
+		fraction = scale.ScaleFraction(s, min, max)
 	}
 
 	if t, ok := s.(scale.Ticker); ok {

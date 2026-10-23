@@ -282,7 +282,7 @@ func gradientEntries(s scale.Scale, format labelFunc, set scale.Labels, hasValue
 	values := set.Values
 	domain := s.Domain()
 	d0, dn := domain0(domain), peekValue(domain)
-	fraction := scale.ScaleFraction(s, jsval.ToNumber(d0), jsval.ToNumber(dn))
+	fraction := scale.ScaleFraction(s, d0, dn)
 
 	// if automatic label generation produces 2 or fewer values, use the
 	// domain end points instead (vega#1364); dates compare by identity

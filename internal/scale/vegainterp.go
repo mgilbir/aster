@@ -310,9 +310,12 @@ func QuantizeInterpolator(interpolator UnitInterpolator, count int) ([]jsval.Val
 // ScaleFraction is vega-scale's scaleFraction: a function that maps a value in
 // [min, max] to its position in [0, 1] using the scale's own transform family
 // (linear, log, pow, ...), so that a gradient legend can be laid out in the
-// scale's spacing. A degenerate or infinite extent gives the constant 0.5.
-func ScaleFraction(s Scale, min, max float64) func(x jsval.Value) jsval.Value {
-	delta := max - min
+// scale's spacing. A degenerate or infinite extent (`max - min`) gives the
+// constant 0.5. The new scale's domain is [min, max] as given, not as
+// numbers: a threshold scale keeps its domain's values, and one of null
+// compares with nothing (d3.ascending), where 0 would compare as a number.
+func ScaleFraction(s Scale, min, max jsval.Value) func(x jsval.Value) jsval.Value {
+	delta := jsval.ToNumber(max) - jsval.ToNumber(min)
 	if delta == 0 || math.IsInf(delta, 0) || math.IsNaN(delta) {
 		half := jsval.Num(0.5)
 		return func(jsval.Value) jsval.Value { return half }
@@ -326,7 +329,7 @@ func ScaleFraction(s Scale, min, max float64) func(x jsval.Value) jsval.Value {
 		half := jsval.Num(0.5)
 		return func(jsval.Value) jsval.Value { return half }
 	}
-	f.SetDomain([]jsval.Value{jsval.Num(min), jsval.Num(max)})
+	f.SetDomain([]jsval.Value{min, max})
 	f.SetRange([]jsval.Value{jsval.Num(0), jsval.Num(1)})
 	for _, m := range [...]string{"clamp", "base", "constant", "exponent"} {
 		if v, ok := Get(s, m); ok {

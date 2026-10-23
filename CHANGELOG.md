@@ -40,6 +40,7 @@ What changed between versions, for users of the library and the CLI. Breaking ch
 
 ### Fidelity
 
+- A gradient of a scale (`gradient()` in an expression, a gradient legend) places its stops with a scale of the same kind over the domain's first and last values as they are, as vega-scale's `scaleFraction` does, not as numbers: a threshold scale whose first threshold is null placed every stop at 1 where upstream places them at 0, since a null threshold compares with nothing and not as 0. Found by the nightly Vega type-confusion differential.
 - **breaking (output, PNG of SVG input):** a stroke thinner than a device pixel painted with a gradient or a pattern is drawn at the stroke's coverage, as tiny-skia scales the paint of a hairline (`Pixmap::stroke_path`); it was drawn at full opacity, so a 0.2 px gradient line weighed five times the same line in a colour (C46).
 - **breaking (output, PNG of SVG input):** a gradient stop's `currentColor` is the stop's own `color` (inherited through its ancestors, black when none), as usvg resolves it; it was the colour of the first element painted with the gradient (C109).
 - **breaking (output, PNG of SVG input):** a `<use>` that references itself, directly or through other uses, is skipped as usvg skips it: one whose element is the use itself, an ancestor of it, or the use being expanded around it, or holds a use of either. Such a document failed whole with "element nesting too deep". A longer cycle, which resvg refuses as nested too deep, fails with an error naming the cycle (C111).
