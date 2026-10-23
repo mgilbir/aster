@@ -1,5 +1,127 @@
 # Engine comparison
 
+## 2026-10-23: after the audit fixes and their performance follow-ups
+
+Produced at ee3d5769 (after #168–#173) on a Linux x86-64 machine, an AMD Ryzen 9 6900HX (8 cores, 16 threads), with node 24.21.0, the version the oracle pins. This is a different machine from the runs below, so compare the speedups, not the times. Node's times here are close to its times on the M1 Pro (Vega-Lite examples to SVG: 6.20 ms against 6.62 ms by geomean). The engine's times differ by machine and by the code changed between the runs, which one run on each machine cannot separate.
+
+The machine is shared, and a single `run.sh` pass, which times node first and the engine after it, came out with each engine under a different load. The figures below therefore come from six alternating rounds: node, engine, engine, node, node, engine, each started only when the one-minute load average was below 1. Each case keeps the lowest of its three medians. For each engine, two of its rounds agree within 1% (Vega-Lite examples to SVG: node 6.25 and 6.32 ms, the engine 2.37 and 2.36 ms by geomean), and the third ran under another workload. Raw JSON, merged as reported, is in `results-2026-10-23/`.
+
+Between this run and the one below, the audit fixes (#154, mainly a27152dc) made the Vega parse stage about 20% slower and Vega-Lite compilation about 8% slower. #168–#173 recovered part of that and sped up other paths: nested references, confidence intervals, date keys, data ingest, map shapes and the per-call cost. The engine's four failures are the harness's, not the engine's. Two charts load images the harness cannot serve, a local file it does not have and an external URL, and image load errors now fail a call unless an error handler says otherwise. `projections` uses `airy`, a d3-geo-projection extra that the engine has only through `WithProjection`, which the harness does not call.
+
+### Engines
+
+| engine | version | environment | init | first VL→SVG | peak RSS | failed cases |
+|---|---|---|---:|---:|---:|---:|
+| node 24 | Vega 6.4.0 / Vega-Lite 6.4.3, node-canvas 3.2.3 | node v24.21.0 linux/x64, AMD Ryzen 9 6900HX with Radeon Graphics | 195 ms | 41.3 ms | 6432 MB | 2 |
+| aster | Vega 6.4.0 / Vega-Lite 6.4.3, pure Go | go1.27.2 linux/amd64, GOMAXPROCS=16 | 0.01 ms | 7.93 ms | 320 MB | 4 |
+
+Times are the median of repeated runs on a warm engine (budget 300 ms per case, at least 3 runs unless one run exceeds 2 s). Only cases every engine completed are compared.
+
+### vl-examples, Vega-Lite → Vega JSON (627 specs)
+
+| engine | geomean | median | p90 | max | total | speedup vs node 24 (geomean) | faster than node 24 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| node 24 | 0.67 ms | 0.57 ms | 1.31 ms | 4.63 ms | 495 ms | — | — |
+| aster | 0.39 ms | 0.33 ms | 0.75 ms | 3.36 ms | 293 ms | 1.73× | 627/627 |
+
+### vl-examples, spec → SVG (627 specs)
+
+| engine | geomean | median | p90 | max | total | speedup vs node 24 (geomean) | faster than node 24 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| node 24 | 6.20 ms | 5.62 ms | 17.9 ms | 459 ms | 6832 ms | — | — |
+| aster | 2.35 ms | 2.07 ms | 7.62 ms | 152 ms | 2639 ms | 2.64× | 618/627 |
+
+### vl-examples, spec → PNG (626 specs)
+
+| engine | geomean | median | p90 | max | total | speedup vs node 24 (geomean) | faster than node 24 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| node 24 | 12.4 ms | 11.6 ms | 32.1 ms | 396 ms | 11.9 s | — | — |
+| aster | 7.07 ms | 6.74 ms | 20.0 ms | 235 ms | 7175 ms | 1.75× | 620/626 |
+
+### vg-gallery, spec → SVG (91 specs)
+
+| engine | geomean | median | p90 | max | total | speedup vs node 24 (geomean) | faster than node 24 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| node 24 | 6.22 ms | 4.63 ms | 47.9 ms | 152 ms | 1596 ms | — | — |
+| aster | 2.45 ms | 1.78 ms | 25.9 ms | 167 ms | 821 ms | 2.54× | 90/91 |
+
+### vg-gallery, spec → PNG (90 specs)
+
+| engine | geomean | median | p90 | max | total | speedup vs node 24 (geomean) | faster than node 24 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| node 24 | 19.1 ms | 16.7 ms | 80.8 ms | 185 ms | 3014 ms | — | — |
+| aster | 13.5 ms | 13.3 ms | 59.8 ms | 182 ms | 2216 ms | 1.41× | 86/90 |
+
+### Highlights (end-to-end SVG and PNG)
+
+| spec | stage | node 24 | aster |
+|---|---|---:|---:|
+| vl-examples/bar | svg | 2.63 ms | 0.90 ms |
+| vl-examples/bar | png | 5.79 ms | 2.91 ms |
+| vl-examples/trellis_bar | svg | 6.93 ms | 2.09 ms |
+| vl-examples/trellis_bar | png | 19.5 ms | 11.4 ms |
+| vl-examples/repeat_splom | svg | 88.1 ms | 23.9 ms |
+| vl-examples/repeat_splom | png | 162 ms | 99.2 ms |
+| vl-examples/geo_choropleth | svg | 209 ms | 63.2 ms |
+| vl-examples/geo_choropleth | png | 215 ms | 81.9 ms |
+| vg-gallery/scatter-plot | svg | 4.68 ms | 1.58 ms |
+| vg-gallery/scatter-plot | png | 15.6 ms | 9.32 ms |
+| vg-gallery/stacked-area-chart | svg | 1.54 ms | 0.45 ms |
+| vg-gallery/stacked-area-chart | png | 6.58 ms | 4.47 ms |
+| vg-gallery/treemap | svg | 1.58 ms | 0.73 ms |
+| vg-gallery/treemap | png | 20.4 ms | 21.5 ms |
+| vg-gallery/county-unemployment | svg | 152 ms | 46.6 ms |
+| vg-gallery/county-unemployment | png | 185 ms | 83.4 ms |
+| vg-gallery/force-directed-layout | svg | 45.4 ms | 24.0 ms |
+| vg-gallery/force-directed-layout | png | 58.7 ms | 36.6 ms |
+| vg-gallery/beeswarm-plot | svg | 16.0 ms | 8.90 ms |
+| vg-gallery/beeswarm-plot | png | 21.4 ms | 13.3 ms |
+| vg-gallery/contour-plot | svg | 12.7 ms | 5.91 ms |
+| vg-gallery/contour-plot | png | 34.7 ms | 34.8 ms |
+| vg-gallery/world-map | svg | 18.1 ms | 6.14 ms |
+| vg-gallery/world-map | png | 45.3 ms | 32.8 ms |
+
+### Slowest svg cases (by the slowest engine)
+
+| spec | node 24 | aster |
+|---|---:|---:|
+| vl-examples/geo_circle | 459 ms | 152 ms |
+| vl-examples/interactive_geo_facet_species | 332 ms | 134 ms |
+| vl-examples/geo_trellis | 260 ms | 93.9 ms |
+| vl-examples/geo_choropleth | 209 ms | 63.2 ms |
+| vg-gallery/word-cloud | 103 ms | 167 ms |
+| vg-gallery/county-unemployment | 152 ms | 46.6 ms |
+| vg-gallery/map-with-tooltip | 112 ms | 52.3 ms |
+| vl-examples/trellis_area_seattle | 96.3 ms | 41.0 ms |
+| vg-gallery/platformer | 94.4 ms | 33.2 ms |
+| vl-examples/repeat_splom | 88.1 ms | 23.9 ms |
+
+### Slowest png cases (by the slowest engine)
+
+| spec | node 24 | aster |
+|---|---:|---:|
+| vl-examples/geo_circle | 396 ms | 235 ms |
+| vl-examples/interactive_geo_facet_species | 357 ms | 187 ms |
+| vl-examples/geo_trellis | 335 ms | 166 ms |
+| vl-examples/geo_choropleth | 215 ms | 81.9 ms |
+| vg-gallery/county-unemployment | 185 ms | 83.4 ms |
+| vg-gallery/word-cloud | 128 ms | 182 ms |
+| vg-gallery/calendar-view | 179 ms | 116 ms |
+| vl-examples/repeat_splom | 162 ms | 99.2 ms |
+| vl-examples/bar_count_minimap | 155 ms | 114 ms |
+| vg-gallery/map-with-tooltip | 140 ms | 78.9 ms |
+
+### Failures
+
+- **node 24**: 2
+  - vl-examples/scatter_image png: Image given has not completed loading
+  - vg-gallery/projections png: the surface type is not appropriate for the operation
+- **aster**: 4
+  - vl-examples/scatter_image png: aster: rendering PNG: image "data/ffox.png" could not be loaded: enginebench: no such dataset: data/ffox.png
+  - vg-gallery/platformer png: aster: rendering PNG: image "https://i.ibb.co/ZBc5RZK/Screen-Shot-2020-12-13-at-3-36-09-PM.png" could not be loaded: enginebench: not a local dataset: https://i.ibb.co/ZBc5RZK/Screen-Shot-2020-12-13-a
+  - vg-gallery/projections svg: aster: rendering Vega: unrecognized projection type: airy
+  - vg-gallery/projections png: aster: rendering Vega: unrecognized projection type: airy
+
 ## 2026-10-03: the pure-Go engine after the performance work
 
 Produced by `NODE="volta run --node 24 node" run.sh` on the same Apple M1 Pro as the run below, at 819a348 (after #48–#57, which cut the PDF stage, the PNG encoder and rasterizer, and the dataflow). Raw JSON in `results-2026-10-03/`. The machine had about one and a half cores of background load (a Docker VM, Spotlight, a browser), which falls on node and the engine alike; node 24 measured about 8% slower than on 2026-09-30, so compare the engine with its own earlier times (SVG geomean 2.40 → 1.92 ms, PNG 7.89 → 7.17 ms) as well as with node.
