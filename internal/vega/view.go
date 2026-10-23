@@ -289,6 +289,20 @@ type runView struct {
 	itemSeq        uint64
 }
 
+// parseRuntime is the parse stage of Render up to the dataflow's
+// operators: the configuration merged, the specification parsed into a
+// dataflow description (and the scope it was parsed in, which the result
+// reads), and the view that runs it. Render builds the
+// operators (runView.build) and releases the view's lists when it is done.
+func parseRuntime(ctx context.Context, spec jsval.Value, opts Options) (*runView, *flowSpec, *Scope) {
+	po := &parseOptions{maxOps: opts.Limits.withDefaults().MaxOperators, ctx: ctx, meter: budget.NewMeter(ctx)}
+	config := mergeConfigWork(&po.meter, defaultConfig(), opts.Config, spec.Get("config"))
+	scope := newScope(config, po)
+	parseView(spec, scope)
+	flow := scope.toRuntime()
+	return newView(ctx, opts, scope.locale), flow, scope
+}
+
 // Render parses spec and evaluates it to a laid-out scenegraph.
 func Render(ctx context.Context, spec jsval.Value, opts Options) (res *Result, err error) {
 	if ctx == nil {
@@ -327,13 +341,7 @@ func Render(ctx context.Context, spec jsval.Value, opts Options) (res *Result, e
 			t0 = now
 		}
 	}
-	po := &parseOptions{maxOps: opts.Limits.withDefaults().MaxOperators, ctx: ctx, meter: budget.NewMeter(ctx)}
-	config := mergeConfigWork(&po.meter, defaultConfig(), opts.Config, spec.Get("config"))
-	scope := newScope(config, po)
-	parseView(spec, scope)
-	flow := scope.toRuntime()
-
-	v := newView(ctx, opts, scope.locale)
+	v, flow, scope := parseRuntime(ctx, spec, opts)
 	defer v.releaseLists()
 	v.build(flow)
 	stage("parse")
