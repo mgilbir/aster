@@ -44,4 +44,38 @@ func TestKnownPlatformSiteRules(t *testing.T) {
 			t.Errorf("last place taken for %q", other)
 		}
 	}
+
+	const legendLabel = "/#document[0]/svg.marks[1]/g[0]/g.mark-group.role-legend[0]/g[1]/g[0]/g.mark-text.role-legend-label[0]/text"
+	for _, ok := range [][]string{
+		{legendLabel + `: text "…", want "gamma"`},
+		{legendLabel + `: text "…", want "alp…"`},
+		{legendLabel + `: text "alpha", want "al…"`, legendLabel + `: text "b…", want "beta"`},
+	} {
+		if !truncationOnly(ok) {
+			t.Errorf("truncation not recognised: %q", ok)
+		}
+	}
+	for _, other := range []string{
+		legendLabel + `: text "…", want "…"`,
+		legendLabel + `: text "alp…", want "bet…"`,
+		legendLabel + `: text "gamma", want "delta"`,
+		legendLabel + `: attribute font-size="1e+308px", want "65536px"`,
+		"/#document[0]/svg.marks[0]: attribute width=\"200\", want \"201\"",
+	} {
+		if truncationOnly([]string{other}) {
+			t.Errorf("truncation taken for %q", other)
+		}
+	}
+	for svg, want := range map[string]bool{
+		`<text font-size="1e+308px">…</text>`:                              true,
+		`<text font-size="Infinity px">`:                                   false,
+		`<text font-size="Infinitypx">…</text>`:                            true,
+		`<text font-size="65537px">a</text><text font-size="9px">b</text>`: true,
+		`<text font-size="65536px">a</text>`:                               false,
+		`<text font-size="11px">a</text>`:                                  false,
+	} {
+		if got := fontPastClamp(svg); got != want {
+			t.Errorf("fontPastClamp(%q) = %v, want %v", svg, got, want)
+		}
+	}
 }

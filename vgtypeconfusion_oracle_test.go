@@ -290,9 +290,9 @@ func TestVegaTypeConfusionMatchesNode(t *testing.T) {
 					results <- outcome{m: m, diff: d, limited: limited, died: died, hasDeath: true}
 					continue
 				}
-				d, limited, sites, all := vegaMutantCompare(c, want, m.spec)
+				d, limited, sites, all, got := vegaMutantCompare(c, want, m.spec)
 				if d != "" {
-					if class := knownPlatformDifference(o, c, m.spec, sites, all); class != "" {
+					if class := knownPlatformDifference(o, c, m.spec, got, sites, all); class != "" {
 						results <- outcome{m: m, known: class}
 						continue
 					}
@@ -435,35 +435,35 @@ func vegaMutantPanics(c *aster.Converter, mutant []byte) string {
 // reports a render the engine stopped at one of its bounds, which is not
 // compared.
 func vegaMutantDiffers(c *aster.Converter, want oracle.Result, mutant []byte) (diff string, limited bool) {
-	diff, limited, _, _ = vegaMutantCompare(c, want, mutant)
+	diff, limited, _, _, _ = vegaMutantCompare(c, want, mutant)
 	return diff, limited
 }
 
 // vegaMutantCompare is vegaMutantDiffers with the sites of an SVG difference
-// (svgdiff.Result.Sites), and whether they are all of them.
-func vegaMutantCompare(c *aster.Converter, want oracle.Result, mutant []byte) (diff string, limited bool, sites []string, all bool) {
+// (svgdiff.Result.Sites), whether they are all of them, and the engine's SVG.
+func vegaMutantCompare(c *aster.Converter, want oracle.Result, mutant []byte) (diff string, limited bool, sites []string, all bool, got string) {
 	got, gerr := c.VegaToSVG(mutant, asUpstream)
 	if gerr != nil && !isEngineBug(gerr) && (errors.Is(gerr, aster.ErrLimit) || errors.Is(gerr, context.DeadlineExceeded)) {
-		return "", true, nil, false
+		return "", true, nil, false, ""
 	}
 	switch errorOutcome(gerr, want.Err) {
 	case statusInternalError:
-		return fmt.Sprintf("the engine panics (%q)", firstLine(gerr.Error())), false, nil, false
+		return fmt.Sprintf("the engine panics (%q)", firstLine(gerr.Error())), false, nil, false, ""
 	case "engine-error":
-		return fmt.Sprintf("the engine errors, node renders (%q)", firstLine(gerr.Error())), false, nil, false
+		return fmt.Sprintf("the engine errors, node renders (%q)", firstLine(gerr.Error())), false, nil, false, ""
 	case "node-error":
-		return fmt.Sprintf("node errors, the engine renders (%q)", firstLine(want.Err)), false, nil, false
+		return fmt.Sprintf("node errors, the engine renders (%q)", firstLine(want.Err)), false, nil, false, ""
 	case "both-error":
-		return "", false, nil, false
+		return "", false, nil, false, ""
 	}
 	d, err := svgdiff.Compare([]byte(got), []byte(want.SVG), svgTolerance)
 	switch {
 	case err != nil:
-		return "the SVG differs: " + firstLine(err.Error()), false, nil, false
+		return "the SVG differs: " + firstLine(err.Error()), false, nil, false, ""
 	case !d.Equal:
-		return fmt.Sprintf("the SVG differs: %d diffs; first: %s", d.DiffCount, firstLine(d.Diff)), false, d.Sites, len(d.Sites) == d.DiffCount
+		return fmt.Sprintf("the SVG differs: %d diffs; first: %s", d.DiffCount, firstLine(d.Diff)), false, d.Sites, len(d.Sites) == d.DiffCount, got
 	}
-	return "", false, nil, false
+	return "", false, nil, false, ""
 }
 
 // TestVegaTypeConfusionRegressionsMatchNode replays the Vega mutants the
