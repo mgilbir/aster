@@ -147,9 +147,10 @@ jobs:
     # seed, as many mutants as the budget allows, rendered here and in node
     # with a cold oracle cache. A difference fails the job and the first
     # mutant of each is uploaded; docs/testing.md describes how one becomes
-    # a regression case. The two platform classes ADR 0013 documents (label
-    # placement over a sliver of an avoided mark, macOS's Math.pow) are
-    # logged instead, once the mutant confirms the class.
+    # a regression case. The three platform classes ADR 0013 documents (label
+    # placement over a sliver of an avoided mark, macOS's Math.pow, text
+    # truncated at a font size past the engine's clamp) are logged instead,
+    # once the mutant confirms the class.
     # arm64 (Apple silicon): the engine's Math (internal/jsmath) is V8's on
     # arm64 bit for bit, which x86-64 V8 is not in the last place of a few
     # transcendental results, enough for force and beeswarm layouts, trail
