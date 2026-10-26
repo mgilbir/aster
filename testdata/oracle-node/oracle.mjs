@@ -30,6 +30,7 @@
 //
 // The same script serves testdata/oracle-node-vl5 (Vega-Lite 5.8), run in that
 // directory with NODE_PATH pointing there.
+import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -235,11 +236,45 @@ canvas.Canvas.prototype.getContext = function (...args) {
   }
   return ctx;
 };
+// node-canvas's font parser reads a number with std::stod, which throws
+// where strtod reports a range error (a value past the largest double, or
+// below the smallest normal one and not zero), and nothing catches the throw:
+// node ends, whatever the parse would have made of the number. The engine
+// takes such a font as one the canvas rejects (internal/text, outOfRange),
+// and so does this. Whether the parser reaches the number depends on what
+// precedes it, so a font string holding one is first set on a context in a
+// child process, and is rejected here if that ends the child.
+const numberRe = /(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/g;
+const outOfRange = (n) => {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return true;
+  if (v !== 0) return Math.abs(v) < 2.2250738585072014e-308;
+  return /[1-9]/.test(n.split(/[eE]/)[0]);
+};
+const canvasPath = require.resolve('canvas');
+const endsNode = new Map();
+const fontEndsNode = (font) => {
+  if (!(font.match(numberRe) || []).some(outOfRange)) return false;
+  if (!endsNode.has(font)) {
+    const r = spawnSync(
+      process.execPath,
+      ['-e', "require(process.argv[1]).createCanvas(1, 1).getContext('2d').font = process.argv[2]", canvasPath, font],
+      { stdio: 'ignore', timeout: 60_000 },
+    );
+    if (r.error) throw r.error;
+    endsNode.set(font, r.status !== 0);
+  }
+  return endsNode.get(font);
+};
 let unmappedFont = '';
 Object.defineProperty(proto, 'font', {
   ...fontProp,
   set(v) {
     const mapped = mapFonts(String(v));
+    if (fontEndsNode(mapped)) {
+      fontRejected = true;
+      return;
+    }
     if (mapped === String(v) && !fontFamilyRe.test(mapped) && accepts(mapped)) unmappedFont = mapped;
     const before = fontProp.get.call(this);
     fontProp.set.call(this, mapped);

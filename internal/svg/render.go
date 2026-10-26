@@ -343,6 +343,13 @@ func (r *renderer) mark(m *scene.Mark, depth int) error {
 		return errNoMarkRenderer
 	}
 	tag := tagOf(m.Type)
+	// The items are read where they are drawn, as upstream reads them: in
+	// their order (zindex), a line or area through all of them.
+	for _, it := range m.Items {
+		if it.Raw != nil {
+			it.RefreshArrays()
+		}
+	}
 
 	w.start("g")
 	cssClass(w, m)
