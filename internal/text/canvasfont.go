@@ -1,6 +1,7 @@
 package text
 
 import (
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -222,7 +223,30 @@ loop:
 	if err != nil && v == 0 {
 		return token{typ: tokInvalid}
 	}
+	if outOfRange(text, v) {
+		// node ends here; the engine takes the font as one the canvas
+		// rejects, which a number the parser cannot read always makes it
+		return token{typ: tokInvalid}
+	}
 	return token{typ: tokNumber, num: v}
+}
+
+// outOfRange reports a number node-canvas reads with std::stod, which
+// throws where strtod reports a range error: a value past the largest
+// double, or one that is not zero and lies below the smallest normal
+// double. Nothing catches the throw, and node ends.
+func outOfRange(text string, v float64) bool {
+	if math.IsInf(v, 0) {
+		return true
+	}
+	if v != 0 {
+		return math.Abs(v) < 0x1p-1022
+	}
+	mant := text
+	if i := strings.IndexAny(text, "eE"); i >= 0 {
+		mant = text[:i]
+	}
+	return strings.ContainsAny(mant, "123456789")
 }
 
 func (t *tokenizer) ident() token {

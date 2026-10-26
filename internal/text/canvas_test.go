@@ -53,6 +53,23 @@ func TestValidCanvasFont(t *testing.T) {
 		"1200 14px Georgia":           false,
 		"italic 10.5px/1.2 monospace": false,
 		"x-large sans-serif":          false,
+		// a number std::stod throws on, which ends node-canvas's process, is
+		// taken as a font the canvas rejects; the neighbours it reads are not
+		// (each checked against node-canvas 3.2.3 on glibc)
+		"1.7976931348623157e308px Foo":  true,
+		"1.7976931348623158e308px Foo":  true, // rounds to the largest double
+		"1.797693134862316e308px Foo":   false,
+		"1e999px Foo":                   false,
+		"2.2250738585072014e-308px Foo": true,
+		"2.225073858507201e-308px Foo":  false,
+		"1e-320px Foo":                  false,
+		"5e-324px Foo":                  false,
+		"1e-999px Foo":                  false,
+		"0e-999px Foo":                  true,
+		"0.0e999px Foo":                 true,
+		"0px Foo":                       true,
+		"1e999 11px Foo":                false,
+		"11px/1e999 Foo":                false,
 	} {
 		if got := ValidCanvasFont(font); got != want {
 			t.Errorf("ValidCanvasFont(%q) = %v, want %v", font, got, want)

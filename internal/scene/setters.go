@@ -150,6 +150,44 @@ var triFields = map[string]func(*Item) *Tri{
 	"aria":             func(it *Item) *Tri { return &it.Aria },
 }
 
+// RefreshArrays reads again the properties the item holds an array for (in
+// Raw), into the fields that hold what the array read when it was set.
+// Upstream keeps the value an encoder gives and reads it where it draws, and
+// a continuous scale whose range holds arrays answers every call with one
+// array, updated in place (d3's genericArray): every item given it draws its
+// last value. The SVG renderer calls this before it reads an item. An object
+// reads the same whatever it holds ("[object Object]", NaN), and a boolean
+// property is true for any array: those are left as they are.
+func (it *Item) RefreshArrays() {
+	for k, v := range it.Raw {
+		if !v.IsArr() {
+			continue
+		}
+		if f, ok := numFields[k]; ok {
+			*f(it) = numOf(v)
+			continue
+		}
+		w := it.Walker()
+		if f, ok := strFields[k]; ok {
+			*f(it) = strOf(w, v)
+			continue
+		}
+		switch k {
+		case "fill":
+			it.Fill = paintOf(w, v)
+		case "stroke":
+			it.Stroke = paintOf(w, v)
+		case "interpolate":
+			it.lineW().Interpolate = strOfTruthy(w, v)
+		case "orient":
+			it.lineW().Orient = strOfTruthy(w, v)
+		case "shape":
+			// an array is never a shape generator (setProp)
+			it.Shape.Name = strOf(w, v)
+		}
+	}
+}
+
 var valFields = map[string]func(*Item) *jsval.Value{
 	"strokeDash": func(it *Item) *jsval.Value { return &it.strokeW().StrokeDash },
 	"text":       func(it *Item) *jsval.Value { return &it.textW().Text },
