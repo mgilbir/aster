@@ -59,7 +59,11 @@ func pdfImages(t *testing.T, pdf []byte) []images.ExtractedImage {
 	if err != nil {
 		t.Fatalf("pdf0.Read: %v", err)
 	}
-	return doc.ExtractImages()
+	imgs, err := doc.ExtractImagesContext(context.Background())
+	if err != nil {
+		t.Fatalf("ExtractImagesContext: %v", err)
+	}
+	return imgs
 }
 
 func TestImagePNG(t *testing.T) {
