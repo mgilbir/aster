@@ -14,6 +14,9 @@ type FlattenParams struct {
 	As []string
 	// Index, when non-empty, receives the position within the arrays.
 	Index string
+	// HasIndex reports an index given as a truthy value whose text is
+	// empty ([], [null]): `if (index) d[index] = i` writes the key "".
+	HasIndex bool
 }
 
 // Flatten unrolls array fields: each tuple becomes max(len) copies, the i-th
@@ -70,7 +73,7 @@ func Flatten(ctx context.Context, data []jsval.Value, p FlattenParams) ([]jsval.
 				}
 				d.Set(names[j], v)
 			}
-			if p.Index != "" {
+			if p.Index != "" || p.HasIndex {
 				d.Set(p.Index, jsval.Int(k))
 			}
 			out = append(out, jsval.Obj(d))

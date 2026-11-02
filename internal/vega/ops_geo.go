@@ -74,7 +74,7 @@ func init() {
 
 	tf["geopath"] = tupleTransform(func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {
 		proj, _ := p.Get("projection").(geo.Projection)
-		gp := geo.GeoPathParams{Projection: proj, As: p.str("as"), PointRadius: pointRadius(p)}
+		gp := geo.GeoPathParams{Projection: proj, As: p.textOr("as", "path"), AsExact: true, PointRadius: pointRadius(p)}
 		if f := p.field("field"); !f.IsNil() {
 			gp.Field = geoAccessor(f)
 		}
@@ -97,10 +97,7 @@ func init() {
 			}
 			shape := geo.NewShape(proj, field, pointRadius(p))
 			shape.Bind(n.g.ctx)
-			as := p.str("as")
-			if as == "" {
-				as = "shape"
-			}
+			as := p.textOr("as", "shape") // _.as || 'shape'
 			// An item's bounds draw its shape, and the SVG writer then asks
 			// for its path data: both come from one walk of the geometry
 			// (Shape.DrawString), the text kept for the writer as long as

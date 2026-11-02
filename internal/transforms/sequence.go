@@ -14,6 +14,10 @@ type SequenceParams struct {
 	Step float64
 	// As is the output field (default "data").
 	As string
+	// AsExact reports that As is the name as the runtime resolved it
+	// (`_.as || default`, then its text): an empty one is the empty name,
+	// which a truthy value spelling nothing ([], [null]) gives.
+	AsExact bool
 }
 
 // Sequence generates tuples {as: start + i*step} for i in [0, ceil((stop-start)/step)),
@@ -25,7 +29,7 @@ func Sequence(ctx context.Context, p SequenceParams) ([]jsval.Value, error) {
 		step = 1
 	}
 	as := p.As
-	if as == "" {
+	if as == "" && !p.AsExact {
 		as = "data"
 	}
 	c := math.Ceil((p.Stop - p.Start) / step)

@@ -1,0 +1,1 @@
+{"width":200,"height":100,"data":[{"name":"d","values":[{"a":[1,2]}],"transform":[{"type":"flatten","fields":["a"],"index":[]}]}],"marks":[{"type":"text","encode":{"update":{"y":{"value":20},"text":{"signal":"data('d')[1][''] + ' ' + data('d')[1]['index'] + ' ' + data('d')[1]['a']"}}}}]}

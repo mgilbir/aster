@@ -411,7 +411,7 @@ func init() {
 	})
 	tf["flatten"] = tupleTransform(func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {
 		p.requireFieldsList(true)
-		return transforms.Flatten(ctxOf(n), in, transforms.FlattenParams{Fields: p.fields("fields"), As: p.truthyTextsUpTo("as", len(p.fields("fields"))), Index: p.textOr("index", "")})
+		return transforms.Flatten(ctxOf(n), in, transforms.FlattenParams{Fields: p.fields("fields"), As: p.truthyTextsUpTo("as", len(p.fields("fields"))), Index: p.textOr("index", ""), HasIndex: paramTruthy(p.Get("index"))})
 	})
 	tf["project"] = tupleTransform(func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {
 		p.requireFieldsList(true)
@@ -446,7 +446,7 @@ func init() {
 			seq = nil
 		} else {
 			seq, err = transforms.Sequence(ctxOf(n), transforms.SequenceParams{
-				Start: p.num("start", 0), Stop: p.num("stop", 0), Step: p.num("step", 1), As: as,
+				Start: p.num("start", 0), Stop: p.num("stop", 0), Step: p.num("step", 1), As: as, AsExact: true,
 			})
 		}
 		if err != nil || len(in) == 0 {
@@ -607,8 +607,8 @@ func init() {
 	})
 	tf["countpattern"] = tupleTransform(func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {
 		return transforms.CountPattern(ctxOf(n), in, transforms.CountPatternParams{
-			Field: p.field("field"), Case: strictText(p.Value("case"), "upper", "lower"), Pattern: p.textOr("pattern", ""),
-			Stopwords: p.textOr("stopwords", ""), As: p.asPair("text", "count"), AsExact: true,
+			Field: p.field("field"), Case: strictText(p.Value("case"), "upper", "lower"), Pattern: p.textOr("pattern", `[\w']+`),
+			PatternExact: true, Stopwords: p.textOr("stopwords", ""), As: p.asPair("text", "count"), AsExact: true,
 		})
 	})
 	tf["kde"] = tupleTransform(func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {
@@ -684,7 +684,7 @@ func init() {
 		p.requirePartitionList(len(in))
 		r, err := transforms.DotBinTuples(n.g.ctx, in, transforms.DotBinParams{
 			Field: p.field("field"), GroupBy: p.fields("groupby"), StepValue: p.Value("step"),
-			Smooth: p.bool("smooth"), As: p.textOr("as", "bin"),
+			Smooth: p.bool("smooth"), As: p.textOr("as", "bin"), AsExact: true,
 		})
 		if err != nil {
 			return nil, err

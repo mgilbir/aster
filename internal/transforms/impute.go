@@ -99,9 +99,10 @@ func imputeReduce(w jsval.Walker, method string, vals []jsval.Value) jsval.Value
 // their text (`kMap[k] || ...`, `gMap[gKey]`), and Impute reproduces what
 // that does with a name Object.prototype has: a key so named finds that
 // member, no position, and its tuple is in no cell; a group so named finds
-// the member and writes its tuples into it, so it is never imputed, and for
-// "__proto__" the member is Object.prototype itself, whose index properties
-// every other group's empty cells then read.
+// the member and writes its tuples into it, so it is never imputed. For
+// "__proto__" the member is Object.prototype itself: upstream writes the
+// group's tuples onto every object of the process, which the engine does
+// not model (ADR 0013), and Impute fails.
 func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Value, error) {
 	method := p.Method
 	if method == "" {
@@ -136,9 +137,6 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 			kMap[ks] = i + 1
 		}
 	}
-	// proto holds what the tuples of a group named "__proto__" wrote onto
-	// Object.prototype, by key position: the value an empty cell reads.
-	var proto map[int]jsval.Value
 	var groups []*group
 	cells := 0
 	gMap := map[string]*group{}
@@ -169,13 +167,12 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 		gKey := sb.String()
 		g := gMap[gKey]
 		if g == nil {
+			if gKey == ProtoKey {
+				// group[j - 1] = t on Object.prototype (index NaN for a key
+				// it names)
+				return nil, fmt.Errorf("impute: a group named __proto__ writes to Object.prototype: %w", ErrNotModelled)
+			}
 			if jsval.ObjectPrototypeHas(gKey) {
-				if gKey == "__proto__" && j > 0 {
-					if proto == nil {
-						proto = map[int]jsval.Value{}
-					}
-					proto[j-1] = t
-				}
 				continue
 			}
 			g = &group{values: dimValues(p.GroupBy, t)}
@@ -202,13 +199,12 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 		}
 		g.vals[j-1] = t
 	}
-	// cell is group[j]: its own element, or for a hole what Object.prototype
-	// holds at that index.
+	// cell is group[j]: undefined for a hole.
 	cell := func(g *group, j int) jsval.Value {
-		if j < len(g.vals) && !g.vals[j].IsUndefined() {
+		if j < len(g.vals) {
 			return g.vals[j]
 		}
-		return proto[j]
+		return jsval.Undefined
 	}
 
 	missing := 0

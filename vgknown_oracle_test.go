@@ -5,7 +5,6 @@ import (
 	"regexp"
 	"runtime"
 	"strconv"
-	"strings"
 
 	"github.com/mgilbir/aster"
 	"github.com/mgilbir/aster/internal/jsval"
@@ -36,11 +35,12 @@ import (
 //     a font size at 65,536 px (a safety control); node-canvas measures a
 //     size past about 390,000 px as FreeType and Pango overflow noise, which
 //     depends on the host's float-to-integer conversion, so a label
-//     truncated to its limit keeps more or less of its text on each host. A
-//     difference is this class when every site of it is a text element's
-//     text, the two sides are truncations of one text (one, its ellipsis
-//     dropped, begins the other), and the engine's document sets a font
-//     size past the clamp.
+//     truncated to its limit keeps more or less of its text on each host,
+//     and an axis sized to its labels is wider or narrower (2,097,163 px on
+//     Linux, 224 on macOS, for one mutant). A difference is this class when
+//     the oracle reports that upstream measured text past the clamp
+//     (oracle.Result.MeasuredPastClamp) and the engine's document sets a
+//     font size past it.
 //
 // Anything else, or a difference with more sites than the comparison lists,
 // fails the test as before.
@@ -48,17 +48,17 @@ import (
 const (
 	knownLabelSliver = "label placement over avoided marks (ADR 0013)"
 	knownMacPow      = "a number one unit in the last place apart (macOS Math.pow, ADR 0013)"
-	knownHugeFont    = "text truncated at a font size past the engine's clamp (ADR 0013)"
+	knownHugeFont    = "text measured at a font size past the engine's clamp (ADR 0013)"
 
 	// fontClampPx is internal/text's maxSizePx.
 	fontClampPx = 1 << 16
 )
 
 // knownPlatformDifference returns the class of the difference sites, all of
-// them, between got, the engine's SVG of mutant, and node's, when it is one
-// of the documented platform classes and the mutant confirms it; ""
-// otherwise.
-func knownPlatformDifference(o *oracle.Oracle, c *aster.Converter, mutant []byte, got string, sites []string, all bool) string {
+// them, between got, the engine's SVG of mutant, and want, node's answer,
+// when it is one of the documented platform classes and the mutant (or the
+// oracle's account of its answer) confirms it; "" otherwise.
+func knownPlatformDifference(o *oracle.Oracle, c *aster.Converter, mutant []byte, want oracle.Result, got string, sites []string, all bool) string {
 	if !all || len(sites) == 0 {
 		return ""
 	}
@@ -68,34 +68,10 @@ func knownPlatformDifference(o *oracle.Oracle, c *aster.Converter, mutant []byte
 	if runtime.GOOS == "darwin" && lastPlaceOnly(sites) {
 		return knownMacPow
 	}
-	if truncationOnly(sites) && fontPastClamp(got) {
+	if want.MeasuredPastClamp && fontPastClamp(got) {
 		return knownHugeFont
 	}
 	return ""
-}
-
-var textSite = regexp.MustCompile(`/text: text "(.*)", want "(.*)"$`)
-
-// truncationOnly reports whether every site is a text element's text, the
-// engine's and node's both truncations of one text: with their trailing
-// ellipsis dropped, one begins the other.
-func truncationOnly(sites []string) bool {
-	for _, s := range sites {
-		m := textSite.FindStringSubmatch(s)
-		if m == nil {
-			return false
-		}
-		g, err1 := strconv.Unquote(`"` + m[1] + `"`)
-		w, err2 := strconv.Unquote(`"` + m[2] + `"`)
-		if err1 != nil || err2 != nil || g == w {
-			return false
-		}
-		g, w = strings.TrimSuffix(g, "…"), strings.TrimSuffix(w, "…")
-		if !strings.HasPrefix(g, w) && !strings.HasPrefix(w, g) {
-			return false
-		}
-	}
-	return true
 }
 
 var fontSizeAttr = regexp.MustCompile(`font-size="([^"]*?)px"`)

@@ -12,6 +12,7 @@ import (
 	"github.com/mgilbir/aster/internal/expr"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scene"
+	"github.com/mgilbir/aster/internal/transforms"
 	"github.com/mgilbir/aster/internal/transforms/hierarchy"
 )
 
@@ -537,12 +538,14 @@ func failLimit(format string, args ...any) {
 // callbacks), so an error a specification causes (an expression exception,
 // an unknown projection) leaves a partial render, as in upstream. The limits
 // that bound the engine's work, cancellation and the engine's own bugs do not
-// have an upstream counterpart and stay fatal.
+// have an upstream counterpart and stay fatal, as does an input the engine
+// does not model where upstream fails (transforms.ErrNotModelled).
 func fatal(err error, internal bool) bool {
 	var le *budget.Stop
 	var st *stopped
 	return internal || errors.Is(err, budget.ErrLimit) || errors.As(err, &le) || errors.As(err, &st) ||
-		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, transforms.ErrNotModelled)
 }
 
 // Graph is the dataflow graph and its scheduler (vega-dataflow Dataflow).
