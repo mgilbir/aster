@@ -342,6 +342,23 @@ func pngOptions(opts []PNGOption) (*pngConfig, error) {
 	return cfg, nil
 }
 
+// imageOptions are an image call's options, checked: the PNG calls', less
+// the ones about the encoding (WithRecodePNG, WithQuantizePNG), which an
+// image call, encoding nothing, refuses rather than ignores.
+func imageOptions(opts []PNGOption) (*pngConfig, error) {
+	cfg, err := pngOptions(opts)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case cfg.quantizeColors > 0:
+		return nil, errors.New("aster: WithQuantizePNG does not apply to an image call, which encodes no PNG")
+	case cfg.recode:
+		return nil, errors.New("aster: WithRecodePNG does not apply to an image call, which encodes no PNG")
+	}
+	return cfg, nil
+}
+
 // pdfOptions are a PDF call's options, checked, and the text mode they select.
 func pdfOptions(opts []PDFOption) (*pdfConfig, svgpdf.TextMode, error) {
 	cfg := &pdfConfig{text: PDFTextEmbed}
@@ -727,6 +744,63 @@ func (c *Converter) SVGToPNG(svg string, opts ...PNGOption) ([]byte, error) {
 	})
 }
 
+// VegaLiteToImage renders a Vega-Lite spec (JSON) to its rasterized image,
+// without encoding it. It is VegaLiteToPNG minus the PNG encode, for a
+// caller that composites the image itself: a backend that draws the chart
+// into its own framebuffer has no use for a PNG it would decode straight
+// back. Scale, limits, fonts, the theme and the time zone apply as they do
+// for the PNG calls; WithRecodePNG and WithQuantizePNG, which are about the
+// encoding, fail the call.
+func (c *Converter) VegaLiteToImage(spec []byte, opts ...PNGOption) (*image.NRGBA, error) {
+	cfg, err := imageOptions(opts)
+	if err != nil {
+		return nil, err
+	}
+	return call(c, cfg.render, func(ctx context.Context) (*image.NRGBA, error) {
+		svg, err := c.vegaLiteSVG(ctx, spec)
+		if err != nil {
+			return nil, err
+		}
+		return c.svgToImage(ctx, svg, cfg.scale)
+	})
+}
+
+// VegaToImage renders a Vega spec (JSON) to its rasterized image, without
+// encoding it. It is VegaToPNG minus the PNG encode; see VegaLiteToImage.
+func (c *Converter) VegaToImage(spec []byte, opts ...PNGOption) (*image.NRGBA, error) {
+	cfg, err := imageOptions(opts)
+	if err != nil {
+		return nil, err
+	}
+	return call(c, cfg.render, func(ctx context.Context) (*image.NRGBA, error) {
+		svg, err := c.vegaSVG(ctx, spec)
+		if err != nil {
+			return nil, err
+		}
+		return c.svgToImage(ctx, svg, cfg.scale)
+	})
+}
+
+// SVGToImage rasterizes an SVG string to its image, without encoding it. It
+// is SVGToPNG minus the PNG encode; see VegaLiteToImage.
+func (c *Converter) SVGToImage(svg string, opts ...PNGOption) (*image.NRGBA, error) {
+	cfg, err := imageOptions(opts)
+	if err != nil {
+		return nil, err
+	}
+	return call(c, svgInput(cfg.render), func(ctx context.Context) (*image.NRGBA, error) {
+		return c.svgToImage(ctx, svg, cfg.scale)
+	})
+}
+
+// svgToImage rasterizes svg at scale: svgToPNG's raster stage, without the
+// encoding.
+func (c *Converter) svgToImage(ctx context.Context, svg string, scale float64) (img *image.NRGBA, err error) {
+	stage := "rendering image"
+	defer c.recoverStage(ctx, &stage, &err)
+	return c.rasterImage(ctx, svg, scale, stage)
+}
+
 // svgToPNG rasterizes svg as cfg, checked by pngOptions, says.
 func (c *Converter) svgToPNG(ctx context.Context, svg string, cfg *pngConfig) (out []byte, err error) {
 	stage := "rendering PNG"
@@ -753,13 +827,36 @@ func (c *Converter) svgToPNG(ctx context.Context, svg string, cfg *pngConfig) (o
 
 // rasterize draws svg and returns the image and its PNG encoding.
 func (c *Converter) rasterize(ctx context.Context, svg string, scale float64) (*image.NRGBA, []byte, error) {
-	_, sh, err := c.fontSet()
+	img, err := c.rasterImage(ctx, svg, scale, "rendering PNG")
 	if err != nil {
 		return nil, nil, err
 	}
-	sh = raster.BoundShaper(sh, text.ShapingBudgetFrom(ctx))
-	var img *image.NRGBA
 	out, err := timed(ctx, "png", func() ([]byte, error) {
+		// Encoded under ctx, polled per row, as every stage is.
+		var buf bytes.Buffer
+		buf.Grow(len(img.Pix) / 8)
+		if err := pngopt.Encode(ctx, &buf, img); err != nil {
+			return nil, fmt.Errorf("encoding: %w", err) // stageErr names the stage
+		}
+		return buf.Bytes(), nil
+	})
+	if err != nil {
+		return nil, nil, c.stageErr(ctx, "rendering PNG", err)
+	}
+	return img, out, nil
+}
+
+// rasterImage draws svg and returns the image the rasterizer drew, without
+// encoding it, its errors named for stage. It is the raster stage of the PNG
+// calls, shared with the ToImage calls, which stop before the encoding that
+// a backend compositing the image itself does not need.
+func (c *Converter) rasterImage(ctx context.Context, svg string, scale float64, stage string) (img *image.NRGBA, err error) {
+	_, sh, err := c.fontSet()
+	if err != nil {
+		return nil, err
+	}
+	sh = raster.BoundShaper(sh, text.ShapingBudgetFrom(ctx))
+	img, err = timed(ctx, "png", func() (*image.NRGBA, error) {
 		lim := c.lim.rasterAt(scale)
 		// The copy of the input Render takes is charged first, and an input
 		// past the bound is refused before it is made (C8).
@@ -771,26 +868,16 @@ func (c *Converter) rasterize(ctx context.Context, svg string, scale float64) (*
 			return nil, err
 		}
 		defer l.Free(int64(len(svg)))
-		var err error
-		img, err = raster.Render([]byte(svg), raster.Options{Scale: scale, Shaper: sh, Context: ctx, Limits: lim, Images: imagesFrom(ctx).load, ImageError: imagesFrom(ctx).imageError(ctx)})
-		if err != nil {
-			return nil, err
-		}
-		// Encoded under ctx, polled per row, as every stage is.
-		var buf bytes.Buffer
-		buf.Grow(len(img.Pix) / 8)
-		if err := pngopt.Encode(ctx, &buf, img); err != nil {
-			return nil, fmt.Errorf("encoding: %w", err) // stageErr names the stage
-		}
-		return buf.Bytes(), nil
+		return raster.Render([]byte(svg), raster.Options{Scale: scale, Shaper: sh, Context: ctx, Limits: lim, Images: imagesFrom(ctx).load, ImageError: imagesFrom(ctx).imageError(ctx)})
 	})
 	if err == nil {
+		// what the images the SVG names did, once they are all loaded
 		err = reportFrom(ctx).flushImages()
 	}
 	if err != nil {
-		return nil, nil, c.stageErr(ctx, "rendering PNG", err)
+		return nil, c.stageErr(ctx, stage, err)
 	}
-	return img, out, nil
+	return img, nil
 }
 
 // PDFTextMode selects how text is represented in PDF output.
