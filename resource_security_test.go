@@ -134,8 +134,10 @@ func TestResourceFlattenArrays(t *testing.T) {
 // Geo: adaptive resampling has no point budget; at a huge projection scale a
 // 515 byte Vega-Lite spec writes a 700 MB SVG path.
 func TestResourceProjectionScale(t *testing.T) {
-	// maxCPU 1: CI baseline 0.26 s CPU; 2x, floor 1 s.
-	runRes(t, resCase{file: "projection-scale-1e12.vl.json", kind: "vl", timeout: "1s", maxPeakMB: 1024, maxCPU: 1, wall: 120 * time.Second})
+	// maxCPU 3: CI worst 1.2 s CPU (Heavy gates of 2026-11-02, a runner slow
+	// across the security job; 0.4 to 0.7 s from 2026-10-23 to 10-31, 0.26 s
+	// when first calibrated); 2x, rounded up.
+	runRes(t, resCase{file: "projection-scale-1e12.vl.json", kind: "vl", timeout: "1s", maxPeakMB: 1024, maxCPU: 3, wall: 120 * time.Second})
 }
 
 // --- cancellation -----------------------------------------------------------
