@@ -727,6 +727,55 @@ func (c *Converter) SVGToPNG(svg string, opts ...PNGOption) ([]byte, error) {
 	})
 }
 
+// VegaLiteToImage renders a Vega-Lite spec (JSON) to its rasterized image,
+// without encoding it. It is VegaLiteToPNG minus the PNG encode, for a
+// caller that composites the image itself: a backend that draws the chart
+// into its own framebuffer has no use for a PNG it would decode straight
+// back. Scale, limits, fonts, the theme and the time zone apply as they do
+// for the PNG calls; the quantize and recode options do not, because they
+// are about the encoding.
+func (c *Converter) VegaLiteToImage(spec []byte, opts ...PNGOption) (*image.NRGBA, error) {
+	cfg, err := pngOptions(opts)
+	if err != nil {
+		return nil, err
+	}
+	return call(c, cfg.render, func(ctx context.Context) (*image.NRGBA, error) {
+		svg, err := c.vegaLiteSVG(ctx, spec)
+		if err != nil {
+			return nil, err
+		}
+		return c.rasterImage(ctx, svg, cfg.scale)
+	})
+}
+
+// VegaToImage renders a Vega spec (JSON) to its rasterized image, without
+// encoding it. It is VegaToPNG minus the PNG encode; see VegaLiteToImage.
+func (c *Converter) VegaToImage(spec []byte, opts ...PNGOption) (*image.NRGBA, error) {
+	cfg, err := pngOptions(opts)
+	if err != nil {
+		return nil, err
+	}
+	return call(c, cfg.render, func(ctx context.Context) (*image.NRGBA, error) {
+		svg, err := c.vegaSVG(ctx, spec)
+		if err != nil {
+			return nil, err
+		}
+		return c.rasterImage(ctx, svg, cfg.scale)
+	})
+}
+
+// SVGToImage rasterizes an SVG string to its image, without encoding it. It
+// is SVGToPNG minus the PNG encode; see VegaLiteToImage.
+func (c *Converter) SVGToImage(svg string, opts ...PNGOption) (*image.NRGBA, error) {
+	cfg, err := pngOptions(opts)
+	if err != nil {
+		return nil, err
+	}
+	return call(c, svgInput(cfg.render), func(ctx context.Context) (*image.NRGBA, error) {
+		return c.rasterImage(ctx, svg, cfg.scale)
+	})
+}
+
 // svgToPNG rasterizes svg as cfg, checked by pngOptions, says.
 func (c *Converter) svgToPNG(ctx context.Context, svg string, cfg *pngConfig) (out []byte, err error) {
 	stage := "rendering PNG"
@@ -753,29 +802,11 @@ func (c *Converter) svgToPNG(ctx context.Context, svg string, cfg *pngConfig) (o
 
 // rasterize draws svg and returns the image and its PNG encoding.
 func (c *Converter) rasterize(ctx context.Context, svg string, scale float64) (*image.NRGBA, []byte, error) {
-	_, sh, err := c.fontSet()
+	img, err := c.rasterImage(ctx, svg, scale)
 	if err != nil {
 		return nil, nil, err
 	}
-	sh = raster.BoundShaper(sh, text.ShapingBudgetFrom(ctx))
-	var img *image.NRGBA
 	out, err := timed(ctx, "png", func() ([]byte, error) {
-		lim := c.lim.rasterAt(scale)
-		// The copy of the input Render takes is charged first, and an input
-		// past the bound is refused before it is made (C8).
-		if m := lim.WithDefaults().MaxInputBytes; len(svg) > m {
-			return nil, fmt.Errorf("raster: SVG input is %d bytes, limit is %d: %w", len(svg), m, ErrLimit)
-		}
-		l := budget.LedgerFrom(ctx)
-		if err := l.Alloc(int64(len(svg))); err != nil {
-			return nil, err
-		}
-		defer l.Free(int64(len(svg)))
-		var err error
-		img, err = raster.Render([]byte(svg), raster.Options{Scale: scale, Shaper: sh, Context: ctx, Limits: lim, Images: imagesFrom(ctx).load, ImageError: imagesFrom(ctx).imageError(ctx)})
-		if err != nil {
-			return nil, err
-		}
 		// Encoded under ctx, polled per row, as every stage is.
 		var buf bytes.Buffer
 		buf.Grow(len(img.Pix) / 8)
@@ -791,6 +822,39 @@ func (c *Converter) rasterize(ctx context.Context, svg string, scale float64) (*
 		return nil, nil, c.stageErr(ctx, "rendering PNG", err)
 	}
 	return img, out, nil
+}
+
+// rasterImage draws svg and returns the image the rasterizer drew, without
+// encoding it. It is the raster stage of the PNG calls, shared with the
+// ToImage calls, which stop before the encoding that a backend compositing
+// the image itself does not need.
+func (c *Converter) rasterImage(ctx context.Context, svg string, scale float64) (img *image.NRGBA, err error) {
+	_, sh, err := c.fontSet()
+	if err != nil {
+		return nil, err
+	}
+	sh = raster.BoundShaper(sh, text.ShapingBudgetFrom(ctx))
+	img, err = timed(ctx, "png", func() (*image.NRGBA, error) {
+		lim := c.lim.rasterAt(scale)
+		// The copy of the input Render takes is charged first, and an input
+		// past the bound is refused before it is made (C8).
+		if m := lim.WithDefaults().MaxInputBytes; len(svg) > m {
+			return nil, fmt.Errorf("raster: SVG input is %d bytes, limit is %d: %w", len(svg), m, ErrLimit)
+		}
+		l := budget.LedgerFrom(ctx)
+		if err := l.Alloc(int64(len(svg))); err != nil {
+			return nil, err
+		}
+		defer l.Free(int64(len(svg)))
+		return raster.Render([]byte(svg), raster.Options{Scale: scale, Shaper: sh, Context: ctx, Limits: lim, Images: imagesFrom(ctx).load, ImageError: imagesFrom(ctx).imageError(ctx)})
+	})
+	if err != nil {
+		return nil, c.stageErr(ctx, "rendering PNG", err)
+	}
+	if err = reportFrom(ctx).flushImages(); err != nil {
+		return nil, c.stageErr(ctx, "rendering PNG", err)
+	}
+	return img, nil
 }
 
 // PDFTextMode selects how text is represented in PDF output.

@@ -4,6 +4,12 @@ What changed between versions, for users of the library and the CLI. Breaking ch
 
 ## Unreleased
 
+### Added
+
+- `VegaLiteToImage`, `VegaToImage` and `SVGToImage` render to the rasterized
+  image without the PNG encode, for callers that composite the image
+  themselves.
+
 ### Build
 
 - **breaking:** the module requires Go 1.27 (it was 1.26). Regular expressions run on goecma262, which takes its Unicode data from Go's standard library (`unicode.SimpleFold` for the `i` flag, `unicode.Categories` and `Scripts` for `\p{...}`): Go 1.26 ships Unicode 15 and Go 1.27 Unicode 17, which is the pinned node's (V8, ICU 78), so under Go 1.26 a regular expression differed from node's for the characters Unicode 16 and 17 added (`/\p{L}/u` on `U+10D4A`, `/\u{A7CB}/iu` against `U+0264`). `TestToolchainUnicodeIsNodes` fails when the toolchain's Unicode is not the version the case tables were recorded from.
