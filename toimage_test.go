@@ -2,7 +2,9 @@ package aster_test
 
 import (
 	"bytes"
+	"image"
 	"image/png"
+	"strings"
 	"testing"
 
 	"github.com/mgilbir/aster"
@@ -22,24 +24,22 @@ var toImageSpec = []byte(`{
     }
 }`)
 
-func TestVegaLiteToImageMatchesPNG(t *testing.T) {
+func newToImageConverter(t *testing.T) *aster.Converter {
+	t.Helper()
 	c, err := aster.New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer c.Close()
+	t.Cleanup(func() { c.Close() })
+	return c
+}
 
-	img, err := c.VegaLiteToImage(toImageSpec, aster.WithScale(2))
-	if err != nil {
-		t.Fatalf("VegaLiteToImage: %v", err)
-	}
+// sameAsPNG fails unless img is, bounds and every pixel, what pngBytes
+// decodes to.
+func sameAsPNG(t *testing.T, img *image.NRGBA, pngBytes []byte) {
+	t.Helper()
 	if img == nil || img.Bounds().Empty() {
-		t.Fatal("VegaLiteToImage returned an empty image")
-	}
-
-	pngBytes, err := c.VegaLiteToPNG(toImageSpec, aster.WithScale(2))
-	if err != nil {
-		t.Fatalf("VegaLiteToPNG: %v", err)
+		t.Fatal("empty image")
 	}
 	dec, err := png.Decode(bytes.NewReader(pngBytes))
 	if err != nil {
@@ -60,31 +60,87 @@ func TestVegaLiteToImageMatchesPNG(t *testing.T) {
 	}
 }
 
-func TestVegaToImageMatchesPNG(t *testing.T) {
-	c, err := aster.New()
+func TestVegaLiteToImageMatchesPNG(t *testing.T) {
+	c := newToImageConverter(t)
+	img, err := c.VegaLiteToImage(toImageSpec, aster.WithScale(2))
 	if err != nil {
-		t.Fatalf("New: %v", err)
+		t.Fatalf("VegaLiteToImage: %v", err)
 	}
-	defer c.Close()
+	out, err := c.VegaLiteToPNG(toImageSpec, aster.WithScale(2))
+	if err != nil {
+		t.Fatalf("VegaLiteToPNG: %v", err)
+	}
+	sameAsPNG(t, img, out)
+}
 
+func TestVegaToImageMatchesPNG(t *testing.T) {
+	c := newToImageConverter(t)
 	vg, err := c.VegaLiteToVega(toImageSpec)
 	if err != nil {
 		t.Fatalf("VegaLiteToVega: %v", err)
 	}
-
 	img, err := c.VegaToImage(vg, aster.WithScale(2))
 	if err != nil {
 		t.Fatalf("VegaToImage: %v", err)
 	}
-	pngBytes, err := c.VegaToPNG(vg, aster.WithScale(2))
+	out, err := c.VegaToPNG(vg, aster.WithScale(2))
 	if err != nil {
 		t.Fatalf("VegaToPNG: %v", err)
 	}
-	dec, err := png.Decode(bytes.NewReader(pngBytes))
+	sameAsPNG(t, img, out)
+}
+
+func TestSVGToImageMatchesPNG(t *testing.T) {
+	c := newToImageConverter(t)
+	svg, err := c.VegaLiteToSVG(toImageSpec)
 	if err != nil {
-		t.Fatalf("decoding the PNG: %v", err)
+		t.Fatalf("VegaLiteToSVG: %v", err)
 	}
-	if dec.Bounds() != img.Bounds() {
-		t.Fatalf("bounds differ: image %v, png %v", img.Bounds(), dec.Bounds())
+	img, err := c.SVGToImage(svg, aster.WithScale(2))
+	if err != nil {
+		t.Fatalf("SVGToImage: %v", err)
+	}
+	out, err := c.SVGToPNG(svg, aster.WithScale(2))
+	if err != nil {
+		t.Fatalf("SVGToPNG: %v", err)
+	}
+	sameAsPNG(t, img, out)
+}
+
+// An image call encodes nothing, so the options about the encoding fail it
+// rather than being silently dropped.
+func TestToImageRefusesEncodingOptions(t *testing.T) {
+	c := newToImageConverter(t)
+	svg, err := c.VegaLiteToSVG(toImageSpec)
+	if err != nil {
+		t.Fatalf("VegaLiteToSVG: %v", err)
+	}
+	for name, opt := range map[string]aster.PNGOption{
+		"WithQuantizePNG": aster.WithQuantizePNG(16),
+		"WithRecodePNG":   aster.WithRecodePNG(),
+	} {
+		calls := map[string]func() (*image.NRGBA, error){
+			"VegaLiteToImage": func() (*image.NRGBA, error) { return c.VegaLiteToImage(toImageSpec, opt) },
+			"VegaToImage":     func() (*image.NRGBA, error) { return c.VegaToImage([]byte(`{}`), opt) },
+			"SVGToImage":      func() (*image.NRGBA, error) { return c.SVGToImage(svg, opt) },
+		}
+		for call, f := range calls {
+			img, err := f()
+			if err == nil || !strings.Contains(err.Error(), name) {
+				t.Errorf("%s with %s: image %v, error %v; want an error naming the option", call, name, img != nil, err)
+			}
+		}
+	}
+}
+
+// An image call's errors name its own stage.
+func TestToImageErrorNamesTheImageStage(t *testing.T) {
+	c := newToImageConverter(t)
+	_, err := c.SVGToImage("<svg")
+	if err == nil {
+		t.Fatal("SVGToImage of malformed SVG succeeded")
+	}
+	if msg := err.Error(); !strings.Contains(msg, "rendering image") || strings.Contains(msg, "PNG") {
+		t.Errorf("error %q, want one naming the image stage and no PNG", msg)
 	}
 }

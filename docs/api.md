@@ -17,7 +17,7 @@ To cancel one call rather than the Converter, pass it `WithContext(ctx)`: every 
 | `VegaLiteToVega(spec, …)` | Vega-Lite JSON → Vega JSON `[]byte` | `RenderOption`: `WithContext`, and `WithErrorHandler`, told of the compiler's warnings; `WithSignal` is ignored, nothing being rendered |
 | `VegaToSVG` / `VegaToPNG` / `VegaToPDF` / `VegaToPDFUsage` | the same, from Vega JSON | as above |
 | `SVGToPNG(svg, …)` / `SVGToPDF(svg, …)` / `SVGToPDFUsage(svg, …)` | an SVG string (best: one Vega wrote) → PNG / PDF | `PNGOption` / `PDFOption` |
-| `VegaLiteToImage(spec, …)` / `VegaToImage(spec, …)` / `SVGToImage(svg, …)` | the rasterized image, without the PNG encode | `PNGOption` (scale, limits; quantize and recode do not apply) |
+| `VegaLiteToImage(spec, …)` / `VegaToImage(spec, …)` / `SVGToImage(svg, …)` | the rasterized image (`*image.NRGBA`), without the PNG encode | `PNGOption`; `WithRecodePNG` and `WithQuantizePNG` fail the call |
 
 The language of a spec is the method's, whatever its `$schema` says, and the `$schema`'s version does not choose the Vega-Lite compiler (`WithVegaLiteVersion` does).
 

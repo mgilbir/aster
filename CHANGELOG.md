@@ -6,9 +6,7 @@ What changed between versions, for users of the library and the CLI. Breaking ch
 
 ### Added
 
-- `VegaLiteToImage`, `VegaToImage` and `SVGToImage` render to the rasterized
-  image without the PNG encode, for callers that composite the image
-  themselves.
+- `VegaLiteToImage`, `VegaToImage` and `SVGToImage` return the rasterized image (`*image.NRGBA`), pixel for pixel what the matching PNG call encodes, without the encode, for callers that composite the image themselves: about a third less time for a bar chart at scale 2. They take the PNG calls' options; `WithRecodePNG` and `WithQuantizePNG`, which are about the encoding, fail the call.
 
 ### Build
 
