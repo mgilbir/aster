@@ -26,6 +26,10 @@ type Params struct {
 	Extent []float64
 	// As is the output field; the default is "path".
 	As string
+	// AsExact reports that As is the name as the runtime resolved it
+	// (`_.as || default`, then its text): an empty one is the empty name,
+	// which a truthy value spelling nothing ([], [null]) gives.
+	AsExact bool
 }
 
 var defaultExtent = [4]float64{-1e5, -1e5, 1e5, 1e5}
@@ -52,7 +56,7 @@ func Transform(ctx context.Context, data []jsval.Value, p Params) error {
 		return errors.New("voronoi: x and y accessors are required")
 	}
 	as := p.As
-	if as == "" {
+	if as == "" && !p.AsExact {
 		as = "path"
 	}
 	b := defaultExtent

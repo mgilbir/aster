@@ -183,6 +183,7 @@ type IsocontourParams struct {
 	Scale, Translate     []float64
 	ScaleFn, TranslateFn func(datum jsval.Value) []float64
 	As                   string // output field; "" means "contour"
+	AsExact              bool   // As is `_.as || 'contour'` resolved: "" is the empty name
 	NoAs                 bool   // as: null, so the geometry is the tuple
 	// ThresholdValues, when not nil, are the thresholds as given, which
 	// the contours carry as their value (Thresholds are them as numbers,
@@ -266,7 +267,7 @@ func Isocontour(ctx context.Context, source []jsval.Value, p IsocontourParams) (
 		}
 	}
 	as := p.As
-	if as == "" {
+	if as == "" && !p.AsExact {
 		as = "contour"
 	}
 
@@ -433,6 +434,7 @@ type KDE2DParams struct {
 	GroupBy []GroupField
 	Counts  bool
 	As      string // output field for the grid; "" means "grid"
+	AsExact bool   // As is `_.as || 'grid'` resolved: "" is the empty name
 	// KeyString is String(v), which keys the groups (upstream keys an object
 	// by the array of group values, which String joins): a date writes to
 	// the second in the view's zone. nil means jsval's AsString.
@@ -484,7 +486,7 @@ func KDE2D(ctx context.Context, source []jsval.Value, p KDE2DParams) ([]jsval.Va
 		}
 	}
 	as := p.As
-	if as == "" {
+	if as == "" && !p.AsExact {
 		as = "grid"
 	}
 	led := budget.LedgerFrom(ctx)

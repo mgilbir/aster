@@ -12,7 +12,8 @@
 //             {"id": 2, "op": "png", "svg": "<svg ...>", "scale": 2}
 //             {"id": 3, "op": "svg", "spec": "...", "wordcloud": "box"}
 //   response: {"id": 1, "svg": "...", "vega": {...}, "png": "<base64>", "err": "...",
-//              "warnings": ["..."], "tainted": "Object.prototype.mean", "oracleErr": "..."}
+//              "warnings": ["..."], "tainted": "Object.prototype.mean", "oracleErr": "...",
+//              "measuredPastClamp": true}
 //
 // "err" is upstream's answer: the error it throws for the input. "oracleErr"
 // is the oracle failing to answer (a request it cannot parse, an unknown op,
@@ -283,6 +284,21 @@ Object.defineProperty(proto, 'font', {
     else fontAccepted.set(mapped, after);
   },
 });
+
+// The engine clamps a font size it measures at 65,536 px (a safety control),
+// and node-canvas measures a size past about 390,000 px as FreeType and Pango
+// overflow noise, which differs between hosts. A text measured past the clamp
+// is noted, and the answer carries it (measuredPastClamp): the Go side then
+// knows a difference may be that class (vgknown_oracle_test.go).
+const fontClampPx = 65536;
+const fontSizeRe = /(?:^|\s)([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)px(?=[\s/]|$)/i;
+let measuredPastClamp = false;
+const measureText = proto.measureText;
+proto.measureText = function (...args) {
+  const m = fontSizeRe.exec(fontProp.get.call(this));
+  if (m && !(Number(m[1]) <= fontClampPx)) measuredPastClamp = true;
+  return measureText.apply(this, args);
+};
 
 const vega = await import(require.resolve('vega'));
 const vl = await import(require.resolve('vega-lite'));
@@ -587,6 +603,7 @@ const renderCanary = async () => {
 };
 const canaryBefore = await renderCanary();
 fontRejected = false;
+measuredPastClamp = false;
 unmappedFont = '';
 const canaryChanged = async () => {
   try {
@@ -611,6 +628,10 @@ const answer = async (res) => {
   if (fontRejected) {
     res.fontRejected = true;
     fontRejected = false;
+  }
+  if (measuredPastClamp) {
+    res.measuredPastClamp = true;
+    measuredPastClamp = false;
   }
   if (unmappedFont) {
     res.oracleErr = `the canvas accepted a font string whose families are not mapped: ${JSON.stringify(unmappedFont)}`;

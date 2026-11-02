@@ -30,6 +30,11 @@ type CountPatternParams struct {
 	// (`_.as || defaults`, then each entry's text): an empty one is the
 	// empty name, not the default.
 	AsExact bool
+	// PatternExact reports that Pattern is the pattern as the runtime
+	// resolved it (`_.pattern || "[\\w']+"`, then its text): an empty one
+	// is the empty pattern, which a truthy value spelling nothing ([],
+	// [null]) gives, and which matches at every position.
+	PatternExact bool
 }
 
 // CountPattern tokenizes a text field with a regular expression and counts the
@@ -40,7 +45,7 @@ type CountPatternParams struct {
 // values that are not strings.
 func CountPattern(ctx context.Context, data []jsval.Value, p CountPatternParams) ([]jsval.Value, error) {
 	pattern := p.Pattern
-	if pattern == "" {
+	if pattern == "" && !p.PatternExact {
 		pattern = "[\\w']+"
 	}
 	// The two patterns are the call's while it runs, paid for before they

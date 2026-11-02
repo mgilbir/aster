@@ -162,7 +162,7 @@ func init() {
 	})
 
 	tf["voronoi"] = tupleTransform(func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {
-		vp := voronoi.Params{X: p.field("x").Get, Y: p.field("y").Get, As: p.textOr("as", "path")}
+		vp := voronoi.Params{X: p.field("x").Get, Y: p.field("y").Get, As: p.textOr("as", "path"), AsExact: true}
 		if len(in) > 0 { // nothing is read for no data
 			vp.Extent = voronoiBounds(p)
 		}
@@ -234,7 +234,7 @@ func init() {
 		if av, ok := paramValueOf(p.Get("as")); ok && av.IsNull() {
 			ip.NoAs = true
 		} else {
-			ip.As = p.textOr("as", "contour")
+			ip.As, ip.AsExact = p.textOr("as", "contour"), true
 		}
 		if f := p.field("field"); !f.IsNil() {
 			ip.Field = contour.Accessor(f.Get)
@@ -260,7 +260,7 @@ func init() {
 	})
 	tf["kde2d"] = tupleTransform(func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {
 		p.requireGroupByList()
-		kp := contour.KDE2DParams{Counts: p.bool("counts"), As: p.str("as"), KeyString: transforms.KeyStringer(ctxOf(n))}
+		kp := contour.KDE2DParams{Counts: p.bool("counts"), As: p.textOr("as", "grid"), AsExact: true, KeyString: transforms.KeyStringer(ctxOf(n))}
 		kp.Size, kp.CellSize, kp.Bandwidth = density2DParams(p)
 		// params(): `_[p] != null ? obj[p](_[p])`: a null accessor keeps
 		// density2D's d => d[0] and d => d[1]

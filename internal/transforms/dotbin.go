@@ -89,6 +89,10 @@ type DotBinParams struct {
 	Smooth    bool
 	// As is the output field; empty means "bin".
 	As string
+	// AsExact reports that As is the name as the runtime resolved it
+	// (`_.as || default`, then its text): an empty one is the empty name,
+	// which a truthy value spelling nothing ([], [null]) gives.
+	AsExact bool
 }
 
 // DotBinResult reports the range of the assigned bins and the step used
@@ -103,7 +107,7 @@ type DotBinResult struct {
 // order) before binning. The step defaults to span(extent)/30 over all tuples.
 func DotBinTuples(ctx context.Context, data []jsval.Value, p DotBinParams) (DotBinResult, error) {
 	as := p.As
-	if as == "" {
+	if as == "" && !p.AsExact {
 		as = "bin"
 	}
 	get := p.Field.Get

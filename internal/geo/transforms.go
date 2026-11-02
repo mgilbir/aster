@@ -144,6 +144,7 @@ type GeoPathParams struct {
 	Field       Accessor   // nil: the tuple is the GeoJSON object
 	PointRadius PointRadius
 	As          string // output field, default "path"
+	AsExact     bool   // As is `_.as || 'path'` resolved: "" is the empty name
 }
 
 // GeoPath is vega-geo's GeoPath transform: it stores in each tuple's As field
@@ -158,7 +159,7 @@ func GeoPath(ctx context.Context, tuples []jsval.Value, p GeoPathParams) (err er
 		field = Identity
 	}
 	as := p.As
-	if as == "" {
+	if as == "" && !p.AsExact {
 		as = "path"
 	}
 	path.SetContext(nil) // upstream leaves the path in string mode

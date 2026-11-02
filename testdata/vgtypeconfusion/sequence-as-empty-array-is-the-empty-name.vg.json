@@ -1,0 +1,1 @@
+{"width":200,"height":100,"data":[{"name":"d","transform":[{"type":"sequence","start":0,"stop":2,"as":[]}]}],"marks":[{"type":"text","encode":{"update":{"y":{"value":20},"text":{"signal":"length(data('d')) + ' ' + data('d')[1][''] + ' ' + data('d')[1]['data']"}}}}]}

@@ -2,6 +2,7 @@ package transforms
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/mgilbir/aster/internal/budget"
@@ -30,6 +31,12 @@ const (
 
 // ErrLimit is wrapped by errors reporting an exceeded work limit.
 var ErrLimit = budget.ErrLimit
+
+// ErrNotModelled is wrapped by the error of an input whose upstream outcome
+// the engine does not reproduce by decision (ADR 0013), where upstream fails
+// for it: it ends the render, whatever the caller's error handler says, as
+// no handler makes what follows upstream's.
+var ErrNotModelled = errors.New("not modelled")
 
 // limitErr reports a count n over limit. n is the number the specification
 // asked for, printed as JavaScript prints it (1e+300, Infinity), never a

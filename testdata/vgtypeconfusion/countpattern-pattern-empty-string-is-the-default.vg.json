@@ -1,0 +1,4 @@
+{"width":200,"height":100,
+"data":[{"name":"lines","values":[{"text":"ab c"},{"text":"de"}]},
+ {"name":"words","source":"lines","transform":[{"type":"countpattern","field":"text","pattern":"","as":["word","n"]}]}],
+"marks":[{"type":"text","encode":{"update":{"y":{"value":20},"text":{"signal":"length(data('words')) + ': ' + pluck(data('words'),'word') + ' / ' + pluck(data('words'),'n')"}}}}]}

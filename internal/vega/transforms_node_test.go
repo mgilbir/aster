@@ -83,6 +83,11 @@ func TestTransformsMatchNode(t *testing.T) {
 			t.Errorf("transforms.node.divergences.txt: %s names no recorded case", name)
 		}
 	}
+	for name := range notModelledTransformCases {
+		if _, ok := rec.Cases[name]; !ok {
+			t.Errorf("notModelledTransformCases: %s names no recorded case", name)
+		}
+	}
 	for _, name := range names {
 		c := rec.Cases[name]
 		t.Run(name, func(t *testing.T) {
@@ -91,6 +96,16 @@ func TestTransformsMatchNode(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := runTransformCase(spec, shaper, c.Canvas == "box")
+			if want, ok := notModelledTransformCases[name]; ok {
+				// node answers; the engine fails by decision (ADR 0013)
+				if c.Error != "" {
+					t.Errorf("node now fails (%q): remove the case from notModelledTransformCases", c.Error)
+				}
+				if got.err != want {
+					t.Errorf("first error %q, want the engine's %q", got.err, want)
+				}
+				return
+			}
 			if got.err != c.Error {
 				t.Errorf("first error %q, want %q", got.err, c.Error)
 			}
@@ -134,6 +149,15 @@ func TestTransformsMatchNode(t *testing.T) {
 			}
 		})
 	}
+}
+
+// notModelledTransformCases are the recorded cases node answers and the
+// engine fails, by decision, on every platform, with the engine's error: what
+// upstream does in them is not modelled (ADR 0013). An impute group named
+// __proto__ is Object.prototype, onto which upstream writes the group's
+// tuples; this case reads nothing it polluted, so node goes on.
+var notModelledTransformCases = map[string]string{
+	"case/impute-proto-group-__proto__": "impute: a group named __proto__ writes to Object.prototype: not modelled",
 }
 
 // transformDivergences reads testdata/transforms.node.divergences.txt: the

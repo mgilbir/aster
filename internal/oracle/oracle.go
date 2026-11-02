@@ -121,6 +121,10 @@ type Result struct {
 	Err  string          `json:"err,omitempty"`
 	// Warnings are what the Vega-Lite compiler logged (Compile only).
 	Warnings []string `json:"warnings,omitempty"`
+	// MeasuredPastClamp: upstream measured text at a font size past the
+	// engine's 65,536 px clamp, which node-canvas measures as overflow noise
+	// that differs between hosts (oracle.mjs).
+	MeasuredPastClamp bool `json:"measuredPastClamp,omitempty"`
 
 	// fontRejected: the answer involved a font string the canvas refused
 	// (oracle.mjs), so it depends on what the process measured before.
@@ -494,6 +498,8 @@ func (p *proc) ask(req map[string]any) (Result, error) {
 			Tainted string `json:"tainted"`
 			// FontRejected: see Result.
 			FontRejected bool `json:"fontRejected"`
+			// MeasuredPastClamp: see Result.
+			MeasuredPastClamp bool `json:"measuredPastClamp"`
 			// OracleErr is the oracle failing to answer: no answer.
 			OracleErr string `json:"oracleErr"`
 		}
@@ -507,7 +513,7 @@ func (p *proc) ask(req map[string]any) (Result, error) {
 		if got.OracleErr != "" {
 			return Result{}, fmt.Errorf("%w: %s", ErrFailed, got.OracleErr)
 		}
-		res = Result{SVG: got.SVG, Vega: got.Veg, Data: got.Data, Err: got.Err, Warnings: got.Warn, fontRejected: got.FontRejected}
+		res = Result{SVG: got.SVG, Vega: got.Veg, Data: got.Data, Err: got.Err, Warnings: got.Warn, MeasuredPastClamp: got.MeasuredPastClamp, fontRejected: got.FontRejected}
 		if got.PNG != "" {
 			if res.PNG, err = base64.StdEncoding.DecodeString(got.PNG); err != nil {
 				return res, fmt.Errorf("oracle: bad PNG: %w", err)

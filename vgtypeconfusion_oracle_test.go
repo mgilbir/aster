@@ -292,7 +292,7 @@ func TestVegaTypeConfusionMatchesNode(t *testing.T) {
 				}
 				d, limited, sites, all, got := vegaMutantCompare(c, want, m.spec)
 				if d != "" {
-					if class := knownPlatformDifference(o, c, m.spec, got, sites, all); class != "" {
+					if class := knownPlatformDifference(o, c, m.spec, want, got, sites, all); class != "" {
 						results <- outcome{m: m, known: class}
 						continue
 					}

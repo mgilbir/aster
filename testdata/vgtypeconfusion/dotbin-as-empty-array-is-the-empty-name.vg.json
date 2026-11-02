@@ -1,0 +1,1 @@
+{"width":200,"height":100,"data":[{"name":"d","values":[{"v":1},{"v":5}],"transform":[{"type":"dotbin","field":"v","as":[]}]}],"marks":[{"type":"text","encode":{"update":{"y":{"value":20},"text":{"signal":"data('d')[1][''] + ' ' + data('d')[1]['bin']"}}}}]}

@@ -4,8 +4,9 @@ import "testing"
 
 // The rules that pick the documented platform classes out of a difference's
 // sites (vgknown_oracle_test.go) take only what the class looks like: label
-// placement of text items, and single numbers one double apart. Any other
-// site keeps a difference a failure.
+// placement of text items, single numbers one double apart, and a document
+// that sets a font size past the engine's clamp (which the oracle must also
+// report having measured). Any other site keeps a difference a failure.
 func TestKnownPlatformSiteRules(t *testing.T) {
 	const label = "/#document[0]/svg.marks[0]/g[0]/g.mark-group.role-frame.root[0]/g[1]/g[4]/g.mark-text.role-mark[616]/text"
 	sliver := []string{
@@ -45,27 +46,6 @@ func TestKnownPlatformSiteRules(t *testing.T) {
 		}
 	}
 
-	const legendLabel = "/#document[0]/svg.marks[1]/g[0]/g.mark-group.role-legend[0]/g[1]/g[0]/g.mark-text.role-legend-label[0]/text"
-	for _, ok := range [][]string{
-		{legendLabel + `: text "…", want "gamma"`},
-		{legendLabel + `: text "…", want "alp…"`},
-		{legendLabel + `: text "alpha", want "al…"`, legendLabel + `: text "b…", want "beta"`},
-	} {
-		if !truncationOnly(ok) {
-			t.Errorf("truncation not recognised: %q", ok)
-		}
-	}
-	for _, other := range []string{
-		legendLabel + `: text "…", want "…"`,
-		legendLabel + `: text "alp…", want "bet…"`,
-		legendLabel + `: text "gamma", want "delta"`,
-		legendLabel + `: attribute font-size="1e+308px", want "65536px"`,
-		"/#document[0]/svg.marks[0]: attribute width=\"200\", want \"201\"",
-	} {
-		if truncationOnly([]string{other}) {
-			t.Errorf("truncation taken for %q", other)
-		}
-	}
 	for svg, want := range map[string]bool{
 		`<text font-size="1e+308px">…</text>`:                              true,
 		`<text font-size="Infinity px">`:                                   false,
