@@ -238,6 +238,10 @@ func (b *blitter) blitSolid(dst, cov, mrow []uint8) {
 	if ca == 0 {
 		return
 	}
+	if mrow == nil && ca == 255 {
+		b.blitOpaque(dst, cov, cr, cg, cb)
+		return
+	}
 	for i, cv := range cov {
 		c := uint32(cv)
 		if mrow != nil {
@@ -260,6 +264,53 @@ func (b *blitter) blitSolid(dst, cov, mrow []uint8) {
 		d[1] = uint8(sg + mul255(uint32(d[1]), ia))
 		d[2] = uint8(sb + mul255(uint32(d[2]), ia))
 		d[3] = uint8(sa + mul255(uint32(d[3]), ia))
+	}
+}
+
+// blitOpaque is blitSolid for an opaque colour and no mask: a run of fully
+// covered pixels is the colour, written as a pattern copied over the run
+// rather than a pixel at a time, which is most of what a filled area is; the
+// other pixels blend as blitSolid blends them.
+func (b *blitter) blitOpaque(dst, cov []uint8, cr, cg, cb uint32) {
+	for i := 0; i < len(cov); {
+		c := uint32(cov[i])
+		if c == 0 {
+			i++
+			continue
+		}
+		if c == 255 {
+			j := i + 1
+			for j < len(cov) && cov[j] == 255 {
+				j++
+			}
+			fillPixels(dst[i*4:j*4], uint8(cr), uint8(cg), uint8(cb), 255)
+			i = j
+			continue
+		}
+		d := dst[i*4 : i*4+4 : i*4+4]
+		sr, sg, sb, sa := mul255(cr, c), mul255(cg, c), mul255(cb, c), mul255(255, c)
+		ia := 255 - sa
+		d[0] = uint8(sr + mul255(uint32(d[0]), ia))
+		d[1] = uint8(sg + mul255(uint32(d[1]), ia))
+		d[2] = uint8(sb + mul255(uint32(d[2]), ia))
+		d[3] = uint8(sa + mul255(uint32(d[3]), ia))
+		i++
+	}
+}
+
+// fillPixels sets every pixel of dst (4 bytes each) to r, g, b, a: a few
+// one by one, a longer run by doubling the filled prefix.
+func fillPixels(dst []uint8, r, g, b, a uint8) {
+	if len(dst) < 4*8 {
+		for i := 0; i+4 <= len(dst); i += 4 {
+			d := dst[i : i+4 : i+4]
+			d[0], d[1], d[2], d[3] = r, g, b, a
+		}
+		return
+	}
+	dst[0], dst[1], dst[2], dst[3] = r, g, b, a
+	for n := 4; n < len(dst); n *= 2 {
+		copy(dst[n:], dst[:n])
 	}
 }
 
