@@ -62,10 +62,11 @@ type rasterizer struct {
 	aa         bool
 	minX, maxX float64
 
-	ctx     context.Context // polled every few rows; nil = never cancelled
-	work    int             // pixels and edge crossings processed by fill since the caller last reset it
-	workCap int             // fill stops once work exceeds this (0 = no cap)
-	stopped bool            // the last fill was cut short (cancelled or over the cap)
+	ctx      context.Context // polled every few rows; nil = never cancelled
+	work     int             // pixels and edge crossings processed by fill since the caller last reset it
+	workCap  int             // fill stops once work exceeds this (0 = no cap)
+	stopped  bool            // the last fill was cut short (cancelled or over the cap)
+	repeated int             // rows the last fill repeated from the row above (tests read it)
 }
 
 func newRasterizer() *rasterizer {
@@ -293,6 +294,18 @@ func (r *rasterizer) fill(evenOdd bool, sink spanSink) {
 	invSS := 1 / float64(ssN)
 	xoff := float64(cx0)
 
+	// A pixel row whose sub-scanlines all cross the same edges, every one of
+	// them vertical, covers what the row above it covered when that row was
+	// one too: its crossings do not depend on the sub-scanline. The inside
+	// of a bar, a tick or a rule is such rows, and they send the row above's
+	// coverage again instead of crossing the edges four times each. The work
+	// charged is what crossing them would have charged.
+	nonVertical := 0 // active edges with dxdy != 0 (NaN included)
+	changes := 0     // edges admitted or retired so far
+	repeat := false  // the row above can be repeated: cov[:repeatN] at repeatX
+	var repeatX int32
+	var repeatN int
+
 	for row := rowStart; row <= rowEnd; row++ {
 		if row&31 == 0 {
 			if r.ctx != nil && r.ctx.Err() != nil {
@@ -300,15 +313,33 @@ func (r *rasterizer) fill(evenOdd bool, sink spanSink) {
 				break
 			}
 		}
+		k0, k1 := row<<r.ssShift, (row+1)<<r.ssShift
+		if repeatRows && repeat && nonVertical == 0 && k1 <= r.maxK &&
+			(next == len(sorted) || r.edges[sorted[next]].ks >= k1) && activeUntil(active, k1) {
+			r.work += len(active)*int(ssN) + repeatN
+			if r.workCap > 0 && r.work > r.workCap {
+				r.stopped = true
+				break
+			}
+			sink.blitRow(int(row), int(cx0+repeatX), cov[:repeatN])
+			r.repeated++
+			continue
+		}
+		repeat = false
+		changesAtStart := -1
 		r.minPx, r.maxPx = int32(math.MaxInt32), -1
 		for s := int32(0); s < ssN; s++ {
-			k := row<<r.ssShift + s
+			k := k0 + s
 			if k < r.minK || k >= r.maxK {
 				continue
 			}
 			// Retire finished edges, admit new ones.
 			for i := 0; i < len(active); {
 				if active[i].ke <= k {
+					if !(active[i].dxdy == 0) {
+						nonVertical--
+					}
+					changes++
 					active[i] = active[len(active)-1]
 					active = active[:len(active)-1]
 				} else {
@@ -318,7 +349,14 @@ func (r *rasterizer) fill(evenOdd bool, sink spanSink) {
 			for next < len(sorted) && r.edges[sorted[next]].ks <= k {
 				e := &r.edges[sorted[next]]
 				active = append(active, activeEdge{x0: e.x0, dxdy: e.dxdy, y0: e.y0 * invSS, ke: e.ke, dir: e.dir})
+				if !(e.dxdy == 0) {
+					nonVertical++
+				}
+				changes++
 				next++
+			}
+			if s == 0 {
+				changesAtStart = changes
 			}
 			if len(active) == 0 {
 				continue
@@ -468,9 +506,31 @@ func (r *rasterizer) fill(evenOdd bool, sink spanSink) {
 		acc[maxPx+1] = 0
 		diff[maxPx+1] = 0
 		sink.blitRow(int(row), int(cx0+minPx), cov[:n])
+		// The row can be repeated when every sub-scanline of it crossed the
+		// same edges (none admitted or retired after the first), all vertical.
+		// (k0 and k1 inside the edges' span is implied, a skipped first
+		// sub-scanline leaving changesAtStart at -1 and a skipped last one
+		// failing the next row's k1 test, and is spelled out all the same.)
+		if k0 >= r.minK && k1 <= r.maxK && changes == changesAtStart && nonVertical == 0 && len(active) > 0 {
+			repeat, repeatX, repeatN = true, minPx, n
+		}
 	}
 	r.active = active[:0]
 	r.cross = cross[:0]
+}
+
+// repeatRows turns the repeating of rows on; tests turn it off to compare.
+var repeatRows = true
+
+// activeUntil reports whether every active edge is still active on
+// sub-scanline k-1, so that none retires before sub-scanline k.
+func activeUntil(active []activeEdge, k int32) bool {
+	for i := range active {
+		if active[i].ke < k {
+			return false
+		}
+	}
+	return true
 }
 
 // Sampling grid: 2^aaSS sub-scanlines per pixel and 2^aaSub horizontal

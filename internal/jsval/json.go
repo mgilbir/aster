@@ -188,6 +188,10 @@ type parser struct {
 	kstk []string
 	// keys interns object keys: rows of a data file repeat the same few names.
 	keys map[string]string
+	// shapes holds, per nesting depth, the keys of the object last closed
+	// there: the rows of a data file repeat one object's keys in one order,
+	// so the next object's keys are first compared with these.
+	shapes [maxShapeDepth]shape
 
 	// sl carves small arrays and objects out of chunks; only documents big
 	// enough to repay it (data files) get one.
@@ -747,14 +751,32 @@ func (p *parser) object(depth int) (Value, error) {
 		return Obj(NewObject(0)), nil
 	}
 	base := len(p.kstk)
+	// sh is the keys of the object last closed at this depth, and same
+	// whether this one's keys have been those so far; plain whether they
+	// all were read as they are written (no escape), the condition for
+	// keeping them as the next shape.
+	var sh *shape
+	if useShapes && p.sl != nil && depth < maxShapeDepth {
+		sh = &p.shapes[depth]
+	}
+	same, plain := sh != nil, sh != nil
 	for {
 		p.ws()
 		if p.i >= len(p.s) || p.s[p.i] != '"' {
 			return Undefined, p.errf("expected object key")
 		}
-		k, err := p.key()
-		if err != nil {
-			return Undefined, err
+		var k string
+		if i := len(p.kstk) - base; same && i < len(sh.keys) && p.keyIs(sh.keys[i]) {
+			k = sh.keys[i]
+		} else {
+			same = false
+			var asIs bool
+			var err error
+			k, asIs, err = p.key()
+			if err != nil {
+				return Undefined, err
+			}
+			plain = plain && asIs
 		}
 		p.ws()
 		if p.i >= len(p.s) || p.s[p.i] != ':' {
@@ -786,10 +808,30 @@ func (p *parser) object(depth int) (Value, error) {
 			}
 			o := p.newObject(n)
 			vbase := len(p.vstk) - n
-			for i := 0; i < n; i++ {
-				o.setUnordered(p.kstk[base+i], p.vstk[vbase+i])
+			if same && sh.distinct {
+				// The keys of the last object (or the first of them),
+				// which had no key twice and no array index: the object
+				// is its keys in the order read, as setUnordered and
+				// order would build it.
+				o.keys = append(o.keys, p.kstk[base:]...)
+				o.vals = append(o.vals, p.vstk[vbase:]...)
+				o.nidx = 0
+				if len(o.keys) > indexThreshold {
+					o.reindex()
+				}
+			} else {
+				for i := 0; i < n; i++ {
+					o.setUnordered(p.kstk[base+i], p.vstk[vbase+i])
+				}
+				o.order()
+				if sh != nil {
+					sh.keys = sh.keys[:0]
+					if plain && n <= maxShapeKeys {
+						sh.keys = append(sh.keys, p.kstk[base:]...)
+						sh.distinct = len(o.keys) == n && o.nidx == 0
+					}
+				}
 			}
-			o.order()
 			clear(p.vstk[vbase:])
 			p.kstk = p.kstk[:base]
 			p.vstk = p.vstk[:vbase]
@@ -803,10 +845,44 @@ func (p *parser) object(depth int) (Value, error) {
 // maxInternKey is the longest key the parser shares between occurrences.
 const maxInternKey = 1 << 10
 
-// key reads an object key, sharing the string between occurrences.
-func (p *parser) key() (string, error) {
+// A shape is the keys of an object as they were read, kept for comparing the
+// next object's keys with (parser.shapes). Every key in it was read as it is
+// written: valid UTF-8 without a quote, a backslash or a control character,
+// so text equal to a key and followed by a quote is that key. distinct
+// reports that no key is in it twice and none is an array index.
+type shape struct {
+	keys     []string
+	distinct bool
+}
+
+// The shapes kept: the objects of the first maxShapeDepth levels, of at most
+// maxShapeKeys keys (a parse holds at most 16 × 64 strings for them).
+const (
+	maxShapeDepth = 16
+	maxShapeKeys  = 64
+)
+
+// useShapes turns shapes on; tests turn them off to compare.
+var useShapes = true
+
+// keyIs reports whether the key at p.i is want, a key of a shape, and if so
+// reads it.
+func (p *parser) keyIs(want string) bool {
+	start := p.i + 1
+	end := start + len(want)
+	if end < len(p.s) && p.s[end] == '"' && string(p.s[start:end]) == want {
+		p.i = end + 1
+		return true
+	}
+	return false
+}
+
+// key reads an object key, sharing the string between occurrences, and
+// reports whether it was read as it is written (no escape, valid UTF-8).
+func (p *parser) key() (string, bool, error) {
 	if p.sl == nil { // a small document repeats few keys; skip the table
-		return p.str()
+		k, err := p.str()
+		return k, false, err
 	}
 	// A key past maxInternKey bytes is read (and polled within) as any
 	// string is, and not shared.
@@ -820,7 +896,7 @@ func (p *parser) key() (string, error) {
 			}
 			p.i = j + 1
 			if k, ok := p.keys[string(raw)]; ok {
-				return k, nil
+				return k, true, nil
 			}
 			k := string(raw)
 			if p.keys == nil {
@@ -829,13 +905,14 @@ func (p *parser) key() (string, error) {
 			if len(p.keys) < 256 {
 				p.keys[k] = k
 			}
-			return k, nil
+			return k, true, nil
 		}
 		if c == '\\' || c < 0x20 {
 			break
 		}
 	}
-	return p.str()
+	k, err := p.str()
+	return k, false, err
 }
 
 func (p *parser) array(depth int) (Value, error) {
