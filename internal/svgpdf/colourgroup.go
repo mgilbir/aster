@@ -27,11 +27,11 @@ type formDef struct {
 // transparencyGroup is the group attributes dictionary of every form: an
 // isolated transparency group in DeviceRGB. The document writes it once,
 // which every form refers to: a chart may have a form per mark.
-func transparencyGroup() *pdf0.Dictionary {
+func transparencyGroup(cs pdf0.Object) *pdf0.Dictionary {
 	group := &pdf0.Dictionary{}
 	group.Set("Type", pdf0.Name("Group"))
 	group.Set("S", pdf0.Name("Transparency"))
-	group.Set("CS", pdf0.Name("DeviceRGB"))
+	group.Set("CS", cs)
 	group.Set("I", pdf0.Boolean(true))
 	return group
 }

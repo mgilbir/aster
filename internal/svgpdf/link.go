@@ -82,7 +82,7 @@ func (r *renderer) link(e *element, st gstate) error {
 }
 
 // annotations are the page's /Annots: a Link with a URI action each.
-func annotations(links []linkAnnot) pdf0.Array {
+func annotations(links []linkAnnot, printable bool) pdf0.Array {
 	out := make(pdf0.Array, 0, len(links))
 	for _, l := range links {
 		action := &pdf0.Dictionary{}
@@ -94,6 +94,11 @@ func annotations(links []linkAnnot) pdf0.Array {
 		a.Set("Rect", pdf0.Array{pdf0.Real(l.box.x0), pdf0.Real(l.box.y0), pdf0.Real(l.box.x1), pdf0.Real(l.box.y1)})
 		a.Set("Border", pdf0.Array{pdf0.Integer(0), pdf0.Integer(0), pdf0.Integer(0)})
 		a.Set("A", action)
+		if printable {
+			// Print (bit 3): PDF/A requires it of every annotation
+			// (ISO 19005-2, 6.3.2).
+			a.Set("F", pdf0.Integer(4))
+		}
 		out = append(out, a)
 	}
 	return out

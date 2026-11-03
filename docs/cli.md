@@ -59,6 +59,7 @@ The `$schema`'s *version* does not choose the compiler: a `v5.json` spec is comp
 | `-scale f` | | ✓ | | | PNG scale factor (default 1) |
 | `-recode` | | ✓ | | | losslessly re-encode the PNG smaller (indexed or truecolor) |
 | `-text mode` | | | ✓ | | `embed` (default), `named` or `outlines`; see [pdf.md](pdf.md) |
+| `-pdfa` | | | ✓ | | `WithPDFAEmbeddable()`: write the chart for embedding in a PDF/A-2 or PDF/A-3 document; not with `-text named`; see [pdf.md](pdf.md) |
 
 With `-allow-file` and HTTP loading (`-allow-http`, `-allow-domain`, `-base-url`) together, a URL is tried against the directories first, in order, then over HTTP: the loaders compose as a `FallbackLoader`. Relative URLs, as the Vega-Lite examples' `data/cars.json`, need `-allow-file` or `-base-url`.
 

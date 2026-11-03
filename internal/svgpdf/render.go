@@ -141,6 +141,9 @@ func checkAttr(e *element, geo map[string]bool, name string) error {
 
 // renderer walks the element tree and emits content stream operators.
 type renderer struct {
+	// pdfa is Options.PDFA: a run of text that would show .notdef is
+	// drawn as outlines.
+	pdfa   bool
 	w      *contentWriter
 	clips  map[string]*clipDef
 	shaper TextShaper
@@ -261,9 +264,12 @@ func render(root *element, shaper TextShaper, fetched map[string][]byte, opts Op
 	r.w = newContentWriter(r.ledger)
 	r.images = newImageCatalog(fetched, r.lim, r.ledger)
 	r.images.onErr = opts.ImageError
+	r.images.noInterpolate = opts.PDFA
+	r.pdfa = opts.PDFA
 	r.images.ctx = opts.Context
 	if opts.Text != TextOutlines && shaper != nil {
 		r.fonts = newFontCatalog(opts.Context, opts.Text, shaper)
+		r.fonts.noCIDSet = opts.PDFA
 	}
 
 	// SVG's y axis points down, PDF's points up. A global flip mapping
