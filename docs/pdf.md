@@ -43,7 +43,7 @@ pdf, err := c.VegaLiteToPDF(spec, aster.WithPDFAEmbeddable())  // for a PDF/A-2 
 
 What is the document's stays the document's: the file identifier, the XMP metadata with the PDF/A identification, and an output intent if it wants one. Transparency is kept, as PDF/A-2 allows; PDF/A-1 forbids it, so the output is not for PDF/A-1 documents.
 
-The tests hold every PDF the option writes, in the tests and under fuzzing, to pdf0's PDF/A-2b, -2u and -3b validator, whose rules are veraPDF's: no rule fails but the document's own two (file identifier, metadata).
+The tests hold every PDF the option writes, in the tests and under fuzzing, to pdf0's PDF/A-2b, -2u and -3b validator, whose rules are veraPDF's: no rule fails but the document's own two (file identifier, metadata). veraPDF itself, the reference validator, finds every chart of the Vega-Lite examples and the Vega gallery compliant inside a PDF/A-2b and a PDF/A-2u document, and charts with images, links, gradients, blend modes and characters no font has inside a PDF/A-3b one ([testing.md](testing.md)).
 
 ## Sharing fonts across many charts
 
