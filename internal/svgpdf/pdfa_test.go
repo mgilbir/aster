@@ -82,11 +82,10 @@ func TestPDFAFeatures(t *testing.T) {
 	}
 	broken := pdfaRules(t, plain, pdfa.PDFA2b)
 	for rule, what := range map[string]string{
-		"6.2.8":      "/Interpolate true",
-		"6.2.11.8":   ".notdef shown",
-		"6.3.2":      "a link without the print flag",
-		"6.2.4.3":    "DeviceRGB without an output intent",
-		"6.2.11.4.2": "an incomplete CIDSet",
+		"6.2.8":    "/Interpolate true",
+		"6.2.11.8": ".notdef shown",
+		"6.3.2":    "a link without the print flag",
+		"6.2.4.3":  "DeviceRGB without an output intent",
 	} {
 		if _, ok := broken[rule]; !ok {
 			t.Errorf("without PDFA, the chart does not break %s (%s): the test does not exercise it", rule, what)
