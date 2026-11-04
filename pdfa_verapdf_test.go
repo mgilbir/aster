@@ -250,3 +250,62 @@ func TestPDFAEmbeddableVeraPDF(t *testing.T) {
 		t.Errorf("veraPDF finds the default PDF's /Interpolate true compliant (%v): the check above proves nothing", failed)
 	}
 }
+
+// TestCIDSetVeraPDF: the CIDSets of the default PDF (no PDF/A option) are
+// exact by veraPDF, in a PDF/A-1b, -2b and -2u document: an embedded
+// TrueType subset's (every glyph slot of the program) and a name-keyed CFF
+// subset's (CID 0 alone). Other rules are not this test's: the default PDF
+// is not made for PDF/A.
+func TestCIDSetVeraPDF(t *testing.T) {
+	cmd := veraPDFCommand(t)
+	otf, err := os.ReadFile("internal/text/testdata/CFFTest.otf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := aster.New(aster.WithLoader(corpusLoader(t)), aster.WithFont("CFFTest", otf))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	charts := map[string]func() ([]byte, error){
+		"cff": func() ([]byte, error) {
+			return c.SVGToPDF(`<svg xmlns="http://www.w3.org/2000/svg" width="200" height="40"><text x="5" y="25" font-family="CFFTest" font-size="16px">01Q</text></svg>`)
+		},
+	}
+	for _, n := range []string{"bar", "point_href", "layer_bar_labels"} {
+		spec, err := os.ReadFile("testdata/vega-lite/v6.4.3/specs/" + n + ".vl.json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		charts[n] = func() ([]byte, error) { return c.VegaLiteToPDF(spec) }
+	}
+	root := t.TempDir()
+	for _, lv := range []struct {
+		flavour string
+		level   pdfa.Level
+	}{{"1b", pdfa.PDFA1b}, {"2b", pdfa.PDFA2b}, {"2u", pdfa.PDFA2u}} {
+		dir := filepath.Join(root, lv.flavour)
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for name, chart := range charts {
+			pdf, err := chart()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Contains(pdf, []byte("/CIDSet")) {
+				t.Fatalf("%s: no CIDSet to check", name)
+			}
+			if err := os.WriteFile(filepath.Join(dir, name+".pdf"), inPDFADocument(t, pdf, lv.level), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for name, failed := range veraPDF(t, cmd, lv.flavour, dir) {
+			for _, f := range failed {
+				if strings.HasPrefix(f, "6.3.5-") || strings.HasPrefix(f, "6.2.11.4.2-") {
+					t.Errorf("PDF/A-%s, %s: %s", lv.flavour, name, f)
+				}
+			}
+		}
+	}
+}

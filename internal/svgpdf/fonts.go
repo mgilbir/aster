@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"sort"
 	"unicode/utf16"
@@ -432,18 +433,39 @@ func buildFontObjects(catalog *fontCatalog, nextNum int) (map[int]*pdf0.Indirect
 			}
 
 			// CIDSet: the CIDs the font program holds, which PDF/A-1
-			// requires for a subset CIDFont (ISO 19005-1, 6.3.5): every
-			// glyph the subset keeps, the components of composites
-			// among them (C114). Bit 0 of byte 0 is the high bit.
-			// As long as the font has glyphs (a CID-keyed one's, as its
-			// highest CID): a reader checks the bitmap against them.
+			// requires for a subset CIDFont (ISO 19005-1, 6.3.5) and
+			// PDF/A-2 and -3 require to be exact when present (ISO
+			// 19005-2, 6.2.11.4.2). Bit 0 of byte 0 is the high bit.
+			// A TrueType program through the Identity CIDToGIDMap has as
+			// its CIDs every glyph slot it declares, the empty ones
+			// included, as veraPDF reads it (its long metrics, which are
+			// no more than its glyphs): the subset keeps every slot of
+			// the font, emptied where a glyph is not kept, so the set is
+			// every slot of the written program (sfntGlyphs). A
+			// CID-keyed CFF program's are the CIDs of the glyphs the
+			// subset keeps, the components of composites among them
+			// (C114). A CFF program that is not CID-keyed has none, as
+			// veraPDF reads it (it fails PDF/A-2 on a set listing its
+			// glyphs and passes PDF/A-1b, -2b and -2u on one listing CID 0
+			// alone), so its set lists CID 0 only.
 			if !catalog.noCIDSet {
-				top := f.parsed.NumGlyphs() - 1
+				top := -1
 				for _, c := range codes {
 					top = max(top, int(c))
 				}
+				var slots int
+				if !f.cff {
+					slots = sfntGlyphs(program)
+					top = max(top, slots-1)
+				}
 				bitmap := make([]byte, top/8+1)
 				for _, c := range codes {
+					if f.cff && !f.cid && c != 0 {
+						continue // a CFF that is not CID-keyed has no CIDs: see above
+					}
+					bitmap[c/8] |= 0x80 >> (c % 8)
+				}
+				for c := 0; c < slots; c++ {
 					bitmap[c/8] |= 0x80 >> (c % 8)
 				}
 				compressedSet, err := flateCompress(bitmap)
@@ -573,4 +595,14 @@ func (f *pdfFont) cffProgram() (program []byte, codes []uint16, err error) {
 		codes = append(codes, f.code(uint16(g)))
 	}
 	return cff, codes, nil
+}
+
+// sfntGlyphs is the glyph count (maxp numGlyphs) of a TrueType program, 0
+// when it has no readable maxp.
+func sfntGlyphs(program []byte) int {
+	maxp := fontsubset.Table(program, "maxp")
+	if len(maxp) < 6 {
+		return 0
+	}
+	return int(binary.BigEndian.Uint16(maxp[4:]))
 }
