@@ -20,9 +20,15 @@
 // freely without quality loss.
 package svgpdf
 
+import "errors"
+
 // Convert translates an SVG document into PDF bytes. The shaper is required
 // when the SVG contains text elements; pass nil only for text-free charts.
 func Convert(svg string, shaper TextShaper, opts Options) ([]byte, error) {
 	pdf, _, err := convert(svg, shaper, opts, false)
 	return pdf, err
 }
+
+// errPDFANamed is Options.PDFA refusing TextNamed: PDF/A requires the fonts
+// that draw text to be embedded, and TextNamed embeds none.
+var errPDFANamed = errors.New("svgpdf: PDF/A output needs its fonts embedded: use TextEmbed or TextOutlines, not TextNamed")

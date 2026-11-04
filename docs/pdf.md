@@ -25,6 +25,26 @@ The file says PDF 1.4, or 1.5 when it holds `ActualText` (a glyph that stands fo
 
 A CFF (OpenType `OTTO`) font is declared a `CIDFontType0`, a TrueType one a `CIDFontType2`; both use `Identity-H`, and the content's codes are always the font's **glyph IDs**. For a CID-keyed CFF font (most CJK OpenType fonts), whose CIDs are not its glyph IDs, the assembler must therefore embed it so that CID = GID: as the glyph-indexed program, not as the CID-keyed original with its own charset.
 
+## Charts for PDF/A documents
+
+`WithPDFAEmbeddable()` (CLI: `-pdfa`) writes a chart that a PDF/A-2 or PDF/A-3 document (ISO 19005-2, -3) can embed, for example with LaTeX's `\includegraphics` under `pdfx`, without breaking a rule of the standard:
+
+```go
+pdf, err := c.VegaLiteToPDF(spec, aster.WithPDFAEmbeddable())  // for a PDF/A-2 or PDF/A-3 document
+```
+
+| PDF/A requires | the chart |
+|---|---|
+| colour that does not depend on the device or on the document's output intent | is sRGB: its resources map `DefaultRGB` onto an embedded sRGB profile, and its transparency groups blend in it |
+| no `/Interpolate true` on images | has none: an image is drawn scaled up with its pixels as blocks in a viewer that honours the mark, rather than smoothed as PNG output is; one scaled down looks the same |
+| embedded fonts, and a complete CIDSet if there is one | embeds its fonts (`PDFTextEmbed`) or draws text as outlines (`PDFTextOutlines`), without a CIDSet, which PDF/A-2 makes optional; `PDFTextNamed` fails the call |
+| no text showing a font's `.notdef` glyph | draws text no font has a glyph for as outlines, its text kept as `ActualText` |
+| printable annotations | gives its links the print flag |
+
+What is the document's stays the document's: the file identifier, the XMP metadata with the PDF/A identification, and an output intent if it wants one. Transparency is kept, as PDF/A-2 allows; PDF/A-1 forbids it, so the output is not for PDF/A-1 documents.
+
+The tests hold every PDF the option writes, in the tests and under fuzzing, to pdf0's PDF/A-2b, -2u and -3b validator, whose rules are veraPDF's: no rule fails but the document's own two (file identifier, metadata). veraPDF itself, the reference validator, finds every chart of the Vega-Lite examples and the Vega gallery compliant inside a PDF/A-2b and a PDF/A-2u document, and charts with images, links, gradients, blend modes and characters no font has inside a PDF/A-3b one ([testing.md](testing.md)).
+
 ## Sharing fonts across many charts
 
 The payoff of `PDFTextNamed`: render each chart with `VegaLiteToPDFUsage` (or `VegaToPDFUsage`, `SVGToPDFUsage`), which also returns a `[]FontUsage` per chart. Each one has `PostScriptName`, `Source` (the font file's bytes) and `GIDs` (the glyphs used).

@@ -273,6 +273,11 @@ func (r *renderer) drawTextLine(str string, st gstate, x, y float64) (float64, e
 		}
 		var err error
 		switch {
+		case r.pdfa && showsNotdef(run):
+			// PDF/A forbids showing .notdef in any rendering mode
+			// (ISO 19005-2, 6.2.11.8): the run is outlines, its text
+			// ActualText.
+			penX, err = r.drawTextRunUnwritten(run, penX, str, fill, !fill)
 		case f != nil && f.outlined:
 			penX, err = r.drawTextRunHidden(f, run, penX, str, st, fill)
 		case !fill:
@@ -612,4 +617,15 @@ func emitGlyphOutline(w *contentWriter, outline []text.Segment, ox, oy float64) 
 		}
 	}
 	return true
+}
+
+// showsNotdef reports whether run shows a font's .notdef glyph (glyph 0),
+// which the shaper gives a character no font of the fallback chain has.
+func showsNotdef(run text.Run) bool {
+	for _, g := range run.Glyphs {
+		if g.GID == 0 {
+			return true
+		}
+	}
+	return false
 }

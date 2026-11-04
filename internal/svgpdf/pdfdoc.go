@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	pdf0 "github.com/mgilbir/pdf0"
+	"github.com/mgilbir/pdf0/pdfa"
 )
 
 // buildPDF assembles a single-page PDF document around the rendered content
@@ -22,7 +23,13 @@ import (
 // The output is deterministic: fixed object numbering (fonts follow the
 // four skeleton objects in first-use order), insertion-ordered dictionaries,
 // no timestamps, no /Info and no /ID.
-func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *imageCatalog, paints paintDefs, width, height float64) ([]byte, error) {
+//
+// pdfa (Options.PDFA) makes the colour device-independent, as PDF/A requires
+// of a document whatever its output intent: object 5 is an sRGB ICC profile,
+// the resources map DefaultRGB onto it (so every DeviceRGB colour, image and
+// shading the page and its forms draw is sRGB), the page is a transparency
+// group blending in it, as are the forms, and links carry the print flag.
+func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *imageCatalog, paints paintDefs, width, height float64, pdfa bool) ([]byte, error) {
 	// Object 1: Catalog
 	catalog := &pdf0.Dictionary{}
 	catalog.Set("Type", pdf0.Name("Catalog"))
@@ -37,6 +44,23 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 	// Resources: ExtGState entries for the opacity values the content
 	// stream references, in first-use order (deterministic).
 	resources := &pdf0.Dictionary{}
+	fontObjects := map[int]*pdf0.IndirectObject{}
+	next := 5
+	// blendCS is the colour space transparency groups blend in.
+	blendCS := pdf0.Object(pdf0.Name("DeviceRGB"))
+	if pdfa {
+		icc, err := srgbICC()
+		if err != nil {
+			return nil, err
+		}
+		fontObjects[next] = &pdf0.IndirectObject{Number: next, Value: icc}
+		srgb := pdf0.Array{pdf0.Name("ICCBased"), pdf0.IndirectRef{Number: next}}
+		next++
+		cs := &pdf0.Dictionary{}
+		cs.Set("DefaultRGB", srgb)
+		resources.Set("ColorSpace", cs)
+		blendCS = srgb
+	}
 	// Soft masks name the form XObjects they are drawn from, which are
 	// numbered last; they are filled in then.
 	type pendingMask struct {
@@ -69,14 +93,16 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 
 	// Font resources and their objects (Type0/CIDFontType2/descriptor/
 	// font program/ToUnicode), numbered after the fixed skeleton objects.
-	fontObjects := map[int]*pdf0.IndirectObject{}
-	next := 5
 	if fonts != nil && len(fonts.list) > 0 {
 		var fontRes *pdf0.Dictionary
+		var built map[int]*pdf0.IndirectObject
 		var err error
-		fontObjects, fontRes, next, err = buildFontObjects(fonts, next)
+		built, fontRes, next, err = buildFontObjects(fonts, next)
 		if err != nil {
 			return nil, err
+		}
+		for n, obj := range built {
+			fontObjects[n] = obj
 		}
 		if fontRes.Len() > 0 {
 			resources.Set("Font", fontRes)
@@ -141,7 +167,7 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 		formNum := map[string]int{}
 		groupNum := next
 		next++
-		fontObjects[groupNum] = &pdf0.IndirectObject{Number: groupNum, Value: transparencyGroup()}
+		fontObjects[groupNum] = &pdf0.IndirectObject{Number: groupNum, Value: transparencyGroup(blendCS)}
 		for _, f := range paints.forms {
 			s, err := f.stream(pdf0.IndirectRef{Number: resNum}, pdf0.IndirectRef{Number: groupNum})
 			if err != nil {
@@ -182,8 +208,15 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 		pdf0.Integer(0), pdf0.Integer(0), pdf0.Real(width), pdf0.Real(height),
 	})
 	page.Set("Resources", pageResources)
+	if pdfa {
+		group := &pdf0.Dictionary{}
+		group.Set("Type", pdf0.Name("Group"))
+		group.Set("S", pdf0.Name("Transparency"))
+		group.Set("CS", blendCS)
+		page.Set("Group", group)
+	}
 	if len(paints.links) > 0 {
-		page.Set("Annots", annotations(paints.links))
+		page.Set("Annots", annotations(paints.links, pdfa))
 	}
 	page.Set("Contents", pdf0.IndirectRef{Number: 4})
 
@@ -222,4 +255,23 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 		return nil, fmt.Errorf("svgpdf: writing PDF: %w", err)
 	}
 	return out.Bytes(), nil
+}
+
+// srgbICC is the ICCBased colour space stream of the sRGB profile pdf0
+// carries for PDF/A output intents (ICC v2.1, which every PDF/A part reads).
+func srgbICC() (*pdf0.Stream, error) {
+	profile, err := pdfa.DefaultSRGBProfile()
+	if err != nil {
+		return nil, fmt.Errorf("svgpdf: the sRGB profile: %w", err)
+	}
+	data, err := flateCompress(profile)
+	if err != nil {
+		return nil, err
+	}
+	s := &pdf0.Stream{Data: data}
+	s.Dict.Set("N", pdf0.Integer(3))
+	s.Dict.Set("Alternate", pdf0.Name("DeviceRGB"))
+	s.Dict.Set("Length", pdf0.Integer(len(data)))
+	s.Dict.Set("Filter", pdf0.Name("FlateDecode"))
+	return s, nil
 }

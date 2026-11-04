@@ -60,6 +60,9 @@ func convert(svg string, shaper TextShaper, opts Options, usage bool) (pdf []byt
 	}()
 	lim := opts.Limits.WithDefaults()
 	opts.Limits = lim
+	if opts.PDFA && opts.Text == TextNamed {
+		return nil, nil, errPDFANamed
+	}
 	root, err := parseSVG(opts.Context, svg, lim)
 	if err != nil {
 		return nil, nil, err
@@ -78,7 +81,7 @@ func convert(svg string, shaper TextShaper, opts Options, usage bool) (pdf []byt
 	if err := ctxErr(opts.Context); err != nil {
 		return nil, nil, err
 	}
-	pdf, err = buildPDF(content, gsList, fonts, images, paints, width, height)
+	pdf, err = buildPDF(content, gsList, fonts, images, paints, width, height, opts.PDFA)
 	if err != nil {
 		return nil, nil, err
 	}

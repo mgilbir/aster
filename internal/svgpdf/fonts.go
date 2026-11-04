@@ -61,6 +61,17 @@ type Options struct {
 	// decodable), with its href. Errors wrapping budget.ErrLimit fail the
 	// conversion instead.
 	ImageError func(href string, err error)
+	// PDFA writes the chart so that a PDF/A-2 or PDF/A-3 document (ISO
+	// 19005-2, -3) can embed it without breaking a rule of the standard:
+	// colour is device-independent (sRGB: DefaultRGB in its resources, the
+	// blending colour space of its transparency groups), images carry no
+	// /Interpolate, embedded fonts no CIDSet, links the print flag, and a
+	// run of text that would show a font's .notdef glyph is drawn as
+	// outlines, its text kept as ActualText. The document-level parts (file
+	// identifier, XMP metadata, PDF/A identification, output intent) are the
+	// embedding document's. TextNamed, whose fonts are not embedded, is
+	// refused.
+	PDFA bool
 }
 
 // pdfFont accumulates the state of one font resource while rendering.
@@ -101,10 +112,14 @@ func (f *pdfFont) code(gid uint16) uint16 {
 // fontCatalog resolves shaped faces to PDF font resources, caching failures
 // so unusable faces consistently fall back to outline drawing.
 type fontCatalog struct {
-	ctx    context.Context // the call's, whose ledger FontData charges
-	mode   TextMode
-	shaper TextShaper
-	fonts  map[*text.Face]*pdfFont
+	// noCIDSet leaves the CIDSet out of embedded fonts (Options.PDFA): PDF/A-2
+	// makes it optional, and a reader that counts the glyphs of a subset
+	// differently from the writer finds one incomplete.
+	noCIDSet bool
+	ctx      context.Context // the call's, whose ledger FontData charges
+	mode     TextMode
+	shaper   TextShaper
+	fonts    map[*text.Face]*pdfFont
 	// hidden are the by-name fonts of faces whose runs, some of them, are
 	// drawn as outlines (see hiddenFor).
 	hidden map[*text.Face]*pdfFont
@@ -416,28 +431,30 @@ func buildFontObjects(catalog *fontCatalog, nextNum int) (map[int]*pdf0.Indirect
 				descriptor.Set("FontFile2", add(fontFile))
 			}
 
-			// CIDSet: the CIDs the font program holds, which PDF/A
+			// CIDSet: the CIDs the font program holds, which PDF/A-1
 			// requires for a subset CIDFont (ISO 19005-1, 6.3.5): every
 			// glyph the subset keeps, the components of composites
 			// among them (C114). Bit 0 of byte 0 is the high bit.
 			// As long as the font has glyphs (a CID-keyed one's, as its
 			// highest CID): a reader checks the bitmap against them.
-			top := f.parsed.NumGlyphs() - 1
-			for _, c := range codes {
-				top = max(top, int(c))
+			if !catalog.noCIDSet {
+				top := f.parsed.NumGlyphs() - 1
+				for _, c := range codes {
+					top = max(top, int(c))
+				}
+				bitmap := make([]byte, top/8+1)
+				for _, c := range codes {
+					bitmap[c/8] |= 0x80 >> (c % 8)
+				}
+				compressedSet, err := flateCompress(bitmap)
+				if err != nil {
+					return nil, nil, 0, err
+				}
+				cidSet := &pdf0.Stream{Data: compressedSet}
+				cidSet.Dict.Set("Length", pdf0.Integer(len(compressedSet)))
+				cidSet.Dict.Set("Filter", pdf0.Name("FlateDecode"))
+				descriptor.Set("CIDSet", add(cidSet))
 			}
-			bitmap := make([]byte, top/8+1)
-			for _, c := range codes {
-				bitmap[c/8] |= 0x80 >> (c % 8)
-			}
-			compressedSet, err := flateCompress(bitmap)
-			if err != nil {
-				return nil, nil, 0, err
-			}
-			cidSet := &pdf0.Stream{Data: compressedSet}
-			cidSet.Dict.Set("Length", pdf0.Integer(len(compressedSet)))
-			cidSet.Dict.Set("Filter", pdf0.Name("FlateDecode"))
-			descriptor.Set("CIDSet", add(cidSet))
 		}
 		descRef := add(descriptor)
 

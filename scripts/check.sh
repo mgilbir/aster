@@ -70,7 +70,7 @@ gate "go mod tidy" go mod tidy -diff
 gate "tests (-short)" sh -c 'go test -short -json -timeout 30m ./... | go run ./internal/cmd/testsummary'
 gate "fixed bounds match docs/limits.md" go test -count=1 -run '^TestFixedLimitsDocMatchesCode$' .
 if [ $fast = 1 ]; then
-	skip "linux/386, windows and darwin builds, fmacheck, recursion audit, race, PDFium, oracle, upstream vectors, sweeps, corpora, heavy security tests" "-fast"
+	skip "linux/386, windows and darwin builds, fmacheck, recursion audit, race, PDFium, veraPDF, oracle, upstream vectors, sweeps, corpora, heavy security tests" "-fast"
 else
 	gate "linux/386 build, vet, tests (-short)" sh -c 'GOARCH=386 go build ./... && GOARCH=386 go vet ./... && GOARCH=386 go test -short -timeout 30m ./...'
 	gate "windows and darwin build, vet" sh -c 'for os in windows darwin; do GOOS=$os go build ./... && GOOS=$os go vet ./... || exit 1; done'
@@ -91,6 +91,11 @@ else
 		gate "PDFium" env ASTER_PDFIUM="$pdfium" go test -count=1 -run TestPDFium ./internal/svgpdf
 	else
 		missing "PDFium" "no ASTER_PDFIUM, and no python3 to install pypdfium2 into .pdfium"
+	fi
+	if command -v docker >/dev/null 2>&1; then
+		gate "veraPDF (PDF/A charts)" env ASTER_VERAPDF="$PWD/scripts/verapdf/docker.sh" go test -short -count=1 -run TestPDFAEmbeddableVeraPDF .
+	else
+		missing "veraPDF" "docker not installed (scripts/verapdf/docker.sh runs veraPDF's image)"
 	fi
 	if command -v pdftotext >/dev/null 2>&1 && command -v pdftoppm >/dev/null 2>&1; then
 		gate "poppler (text extraction, PDF and PNG drift)" sh -c 'ASTER_POPPLER=require go test -count=1 -run "TestPDFTextIsExtractable|TestVectorPDFMatchesPNG" . && ASTER_POPPLER=require go test -count=1 -run TestToUnicodeClusters ./internal/svgpdf'

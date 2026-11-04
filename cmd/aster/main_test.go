@@ -333,3 +333,43 @@ func TestFailedFileLoadSaysWhereItLooked(t *testing.T) {
 		t.Errorf("-allow-file and -base-url: %v, want the file miss, the directory and the HTTP refusal", err)
 	}
 }
+
+// TestRunPDFA: -pdfa writes an image mark's image without /Interpolate and
+// the colour as sRGB (DefaultRGB); by default neither; -pdfa with -text
+// named is an invalid command line.
+func TestRunPDFA(t *testing.T) {
+	dir := t.TempDir()
+	spec := filepath.Join(dir, "image.vl.json")
+	// A 1x1 PNG drawn 40x40: smoothed by default.
+	const png1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+	if err := os.WriteFile(spec, []byte(`{"data":{"values":[{"x":1}]},"mark":{"type":"image","width":40,"height":40},`+
+		`"encoding":{"x":{"field":"x","type":"quantitative"},"url":{"value":"data:image/png;base64,`+png1+`"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		args []string
+		pdfa bool
+	}{{nil, false}, {[]string{"-pdfa"}, true}} {
+		out := filepath.Join(dir, "out.pdf")
+		if err := runPDF(append([]string{"-i", spec, "-o", out}, tc.args...)); err != nil {
+			t.Fatalf("%v: runPDF: %v", tc.args, err)
+		}
+		data, err := os.ReadFile(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(data, []byte("/Subtype /Image")) {
+			t.Fatalf("%v: no image in the PDF", tc.args)
+		}
+		if got := bytes.Contains(data, []byte("/Interpolate true")); got == tc.pdfa {
+			t.Errorf("%v: /Interpolate true written %v", tc.args, got)
+		}
+		if got := bytes.Contains(data, []byte("/DefaultRGB")); got != tc.pdfa {
+			t.Errorf("%v: /DefaultRGB written %v, want %v", tc.args, got, tc.pdfa)
+		}
+	}
+	err := runPDF([]string{"-i", spec, "-o", filepath.Join(dir, "x.pdf"), "-pdfa", "-text", "named"})
+	if err == nil || !strings.Contains(err.Error(), "-pdfa") {
+		t.Errorf("-pdfa -text named: %v, want an invalid command line naming -pdfa", err)
+	}
+}

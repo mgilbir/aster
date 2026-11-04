@@ -359,8 +359,9 @@ func imageOptions(opts []PNGOption) (*pngConfig, error) {
 	return cfg, nil
 }
 
-// pdfOptions are a PDF call's options, checked, and the text mode they select.
-func pdfOptions(opts []PDFOption) (*pdfConfig, svgpdf.TextMode, error) {
+// pdfOptions are a PDF call's options, checked, and what they select of the
+// PDF writer's options (the text mode, PDF/A).
+func pdfOptions(opts []PDFOption) (*pdfConfig, svgpdf.Options, error) {
 	cfg := &pdfConfig{text: PDFTextEmbed}
 	for _, o := range opts {
 		if o != nil {
@@ -376,9 +377,12 @@ func pdfOptions(opts []PDFOption) (*pdfConfig, svgpdf.TextMode, error) {
 	case PDFTextOutlines:
 		mode = svgpdf.TextOutlines
 	default:
-		return nil, 0, fmt.Errorf("aster: unknown PDF text mode %d", cfg.text)
+		return nil, svgpdf.Options{}, fmt.Errorf("aster: unknown PDF text mode %d", cfg.text)
 	}
-	return cfg, mode, nil
+	if cfg.pdfa && mode == svgpdf.TextNamed {
+		return nil, svgpdf.Options{}, errors.New("aster: WithPDFAEmbeddable needs the fonts embedded: PDFTextNamed embeds none (use PDFTextEmbed or PDFTextOutlines)")
+	}
+	return cfg, svgpdf.Options{Text: mode, PDFA: cfg.pdfa}, nil
 }
 
 // VegaToSVG renders a Vega spec (JSON) to an SVG string.
@@ -908,8 +912,8 @@ const (
 )
 
 // PDFOption configures a single PDF render operation: WithPDFText,
-// WithContext, WithErrorHandler, and WithSignal for the Vega and Vega-Lite
-// methods.
+// WithPDFAEmbeddable, WithContext, WithErrorHandler, and WithSignal for the
+// Vega and Vega-Lite methods.
 type PDFOption interface{ applyPDF(*pdfConfig) }
 
 type pdfOption func(*pdfConfig)
@@ -918,6 +922,7 @@ func (f pdfOption) applyPDF(c *pdfConfig) { f(c) }
 
 type pdfConfig struct {
 	text   PDFTextMode
+	pdfa   bool
 	render renderConfig
 }
 
@@ -927,6 +932,25 @@ type pdfConfig struct {
 func WithPDFText(mode PDFTextMode) PDFOption {
 	return pdfOption(func(c *pdfConfig) {
 		c.text = mode
+	})
+}
+
+// WithPDFAEmbeddable writes the chart so that a PDF/A-2 or PDF/A-3
+// document can embed it (as LaTeX's \includegraphics under pdfx does)
+// without breaking a rule of the standard (ISO 19005-2, -3). Its colour is
+// device-independent sRGB, whatever the embedding document's output intent;
+// images are written without /Interpolate, so a viewer draws one scaled up
+// with its pixels as blocks rather than smoothed as PNG output is; embedded
+// fonts carry no CIDSet; links carry the print flag; and text a font cannot
+// draw, which would show its .notdef glyph, is drawn as outlines, its text
+// kept as ActualText. Transparency is kept: PDF/A-2 allows it, PDF/A-1
+// does not, so the output is not for PDF/A-1. The file identifier, XMP
+// metadata, PDF/A identification and output intent are the embedding
+// document's. With PDFTextNamed, whose fonts are not embedded, the call
+// fails before it starts.
+func WithPDFAEmbeddable() PDFOption {
+	return pdfOption(func(c *pdfConfig) {
+		c.pdfa = true
 	})
 }
 
@@ -965,7 +989,7 @@ type pdfOut struct {
 // toPDF is one PDF call: the SVG svg makes (from a specification, or given),
 // converted.
 func (c *Converter) toPDF(opts []PDFOption, usage bool, svg func(ctx context.Context) (string, error)) (pdfOut, error) {
-	cfg, mode, err := pdfOptions(opts)
+	cfg, base, err := pdfOptions(opts)
 	if err != nil {
 		return pdfOut{}, err
 	}
@@ -974,7 +998,7 @@ func (c *Converter) toPDF(opts []PDFOption, usage bool, svg func(ctx context.Con
 		if err != nil {
 			return pdfOut{}, err
 		}
-		pdf, uses, err := c.svgToPDF(ctx, s, mode, usage, true)
+		pdf, uses, err := c.svgToPDF(ctx, s, base, usage, true)
 		return pdfOut{pdf, uses}, err
 	})
 }
@@ -996,12 +1020,12 @@ func (c *Converter) SVGToPDF(svg string, opts ...PDFOption) ([]byte, error) {
 
 // svgPDF is one call converting SVG input to PDF.
 func (c *Converter) svgPDF(svg string, opts []PDFOption, usage bool) (pdfOut, error) {
-	cfg, mode, err := pdfOptions(opts)
+	cfg, base, err := pdfOptions(opts)
 	if err != nil {
 		return pdfOut{}, err
 	}
 	return call(c, svgInput(cfg.render), func(ctx context.Context) (pdfOut, error) {
-		pdf, uses, err := c.svgToPDF(ctx, svg, mode, usage, false)
+		pdf, uses, err := c.svgToPDF(ctx, svg, base, usage, false)
 		return pdfOut{pdf, uses}, err
 	})
 }
@@ -1014,11 +1038,12 @@ func (c *Converter) SVGToPDFUsage(svg string, opts ...PDFOption) ([]byte, []Font
 	return out.pdf, out.uses, err
 }
 
-// svgToPDF converts svg with text mode, reporting its font usage when usage
+// svgToPDF converts svg with the PDF writer's options base selects (text
+// mode, interpolation), reporting its font usage when usage
 // is set: usage copies the font programs it reports. chart is set for the SVG
 // of a chart the caller gave as a specification, which is bounded as the SVG
 // writer bounded it rather than as SVG input (C44).
-func (c *Converter) svgToPDF(ctx context.Context, svg string, mode svgpdf.TextMode, usage, chart bool) (pdf []byte, uses []FontUsage, err error) {
+func (c *Converter) svgToPDF(ctx context.Context, svg string, base svgpdf.Options, usage, chart bool) (pdf []byte, uses []FontUsage, err error) {
 	defer func() {
 		if err != nil {
 			pdf, uses = nil, nil
@@ -1034,7 +1059,8 @@ func (c *Converter) svgToPDF(ctx context.Context, svg string, mode svgpdf.TextMo
 	t0 := time.Now()
 	lim := c.lim.pdfLimits(chart)
 	lim.MaxImagePixels, lim.MaxPixelOps = c.imagePixels(), c.lim.pixelOps
-	popts := svgpdf.Options{Text: mode, Context: ctx, Images: imagesFrom(ctx).load, ImageError: imagesFrom(ctx).imageError(ctx), Limits: lim}
+	popts := base
+	popts.Context, popts.Images, popts.ImageError, popts.Limits = ctx, imagesFrom(ctx).load, imagesFrom(ctx).imageError(ctx), lim
 	if usage {
 		pdf, uses, err = svgpdf.ConvertWithUsage(svg, m, popts)
 	} else {

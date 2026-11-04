@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/svgpdf"
 )
 
 // A bound or the call's end that stops a stage from deep inside it, as a
@@ -35,7 +36,7 @@ func TestStopPanicNamesTheStage(t *testing.T) {
 		{"svg", "writing SVG", func(ctx context.Context) error { _, err := c.vegaSVG(ctx, spec); return err }},
 		{"png", "rendering PNG", func(ctx context.Context) error { _, err := c.svgToPNG(ctx, svg, defaultPNGConfig()); return err }},
 		{"pdf", "rendering PDF", func(ctx context.Context) error {
-			_, _, err := c.svgToPDF(ctx, svg, 0, false, false)
+			_, _, err := c.svgToPDF(ctx, svg, svgpdf.Options{}, false, false)
 			return err
 		}},
 	} {
