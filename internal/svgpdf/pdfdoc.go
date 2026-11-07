@@ -93,11 +93,12 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 
 	// Font resources and their objects (Type0/CIDFontType2/descriptor/
 	// font program/ToUnicode), numbered after the fixed skeleton objects.
+	fontsVersion := "1.1"
 	if fonts != nil && len(fonts.list) > 0 {
 		var fontRes *pdf0.Dictionary
 		var built map[int]*pdf0.IndirectObject
 		var err error
-		built, fontRes, next, err = buildFontObjects(fonts, next)
+		built, fontRes, next, fontsVersion, err = buildFontObjects(fonts, next)
 		if err != nil {
 			return nil, err
 		}
@@ -243,6 +244,11 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 	version := "1.4"
 	if paints.actualText {
 		version = "1.5"
+	}
+	if fontsVersion > version {
+		// pdf0 says what the font objects it wrote need; written bare and
+		// as CIDFontType2, they need no more than 1.3.
+		version = fontsVersion
 	}
 	doc := &pdf0.Document{
 		Version: version,

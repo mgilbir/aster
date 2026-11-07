@@ -480,6 +480,23 @@ func (f *Face) SubsetProgram(gids []int) (program []byte, kept []int, err error)
 	return c.SubsetGlyphs()
 }
 
+// ShapeClone is a clone of the face as loaded, which nothing has shaped
+// through: forme's Clone shares the font's parsing and keeps a record of its
+// own of the glyphs a document uses, which is what a PDF writer embeds from.
+// One document's clone is its own: faces are shared across calls, a record
+// of use is not. Calls into it are guarded as the face's own are (Guard).
+func (f *Face) ShapeClone() *shape.Face {
+	defer f.guard()()
+	return f.shape.Clone()
+}
+
+// Guard is guard for a caller that reads the face through a ShapeClone: a
+// fault reading a mapped font file is a panic for the caller to recover, not
+// the end of the process. Deferred as
+//
+//	defer f.Guard()()
+func (f *Face) Guard() func() { return f.guard() }
+
 // IsCIDKeyed reports whether f's outlines are a CID-keyed CFF font, whose
 // glyphs a PDF addresses by CID (GlyphCode).
 func (f *Face) IsCIDKeyed() (ok bool) {

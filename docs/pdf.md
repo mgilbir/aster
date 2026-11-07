@@ -19,7 +19,7 @@ CLI: `aster pdf -i chart.vl.json -o chart.pdf -text embed|named|outlines`.
 
 In `PDFTextEmbed` a CFF (OpenType `OTTO`) font is embedded as a subset of its CFF program (`FontFile3`, `CIDFontType0C`; a CID-keyed one addressed by its CIDs), a TrueType one as a subset of its outlines. Text whose font program cannot be subset (glyph data that is malformed, for one glyph or for the font) is drawn as outlines, and written over them as invisible text in the font by name, so that it is still selected, searched and copied; the rest of the font is embedded. Text in a face no font program can be had of (a system font whose outlines are over 64 MiB) is drawn as outlines, its text written as `ActualText`, which some readers (poppler, PDFium) do not read around paths.
 
-The file says PDF 1.4, or 1.5 when it holds `ActualText` (a glyph that stands for two texts, such as a precomposed and a combining accent, or the case above).
+The file says PDF 1.4, or 1.5 when it holds `ActualText` (a glyph that stands for two texts, such as a precomposed and a combining accent; text drawn as a font's `.notdef`, which no font has a glyph for; or the case above).
 
 **`PDFTextNamed` is not standalone.** Glyphs are addressed by the glyph IDs of the exact font file used when rendering, so whatever assembles the final document must embed that same file. A viewer that substitutes another font may draw the wrong glyphs.
 
@@ -37,7 +37,7 @@ pdf, err := c.VegaLiteToPDF(spec, aster.WithPDFAEmbeddable())  // for a PDF/A-2 
 |---|---|
 | colour that does not depend on the device or on the document's output intent | is sRGB: its resources map `DefaultRGB` onto an embedded sRGB profile, and its transparency groups blend in it |
 | no `/Interpolate true` on images | has none: an image is drawn scaled up with its pixels as blocks in a viewer that honours the mark, rather than smoothed as PNG output is; one scaled down looks the same |
-| embedded fonts, and a complete CIDSet if there is one | embeds its fonts (`PDFTextEmbed`) or draws text as outlines (`PDFTextOutlines`), without a CIDSet, which PDF/A-2 makes optional; `PDFTextNamed` fails the call |
+| embedded fonts, and a complete CIDSet if there is one | embeds its fonts (`PDFTextEmbed`) or draws text as outlines (`PDFTextOutlines`); an embedded TrueType font's CIDSet lists every glyph slot of its program, as veraPDF reads it, and a CFF font that is not CID-keyed, which has no CIDs, carries none; `PDFTextNamed` fails the call |
 | no text showing a font's `.notdef` glyph | draws text no font has a glyph for as outlines, its text kept as `ActualText` |
 | printable annotations | gives its links the print flag |
 

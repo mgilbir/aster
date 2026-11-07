@@ -18,7 +18,7 @@ flowchart LR
   L -.->|images, links| S
   S --> OSVG[("SVG")]
   OSVG --> R["internal/raster"] --> PNG[("PNG")]
-  OSVG --> P["internal/svgpdf<br/>+ fontsubset"] --> PDF[("PDF")]
+  OSVG --> P["internal/svgpdf<br/>+ pdf0 fonts"] --> PDF[("PDF")]
   L -.->|images| R
   L -.->|images| P
   SVGIN["SVG input<br/>SVGToPNG, SVGToPDF"] --> R
@@ -39,7 +39,7 @@ flowchart LR
 | SVG output | `svg` | vega-scenegraph's `SVGStringRenderer`, byte for byte |
 | text measurement and shaping | `text` (forme) | node-canvas / the browser's canvas |
 | SVG → PNG | `raster`, `pngopt` | resvg (the reference it is tested against) |
-| SVG → PDF | `svgpdf`, `fontsubset` | none |
+| SVG → PDF | `svgpdf`, with pdf0 writing the fonts; `fontsubset` for `SubsetFont` | none |
 | JavaScript's numbers, `Math` and sort | `jsval`, `jsmath`, `jssort` | V8, bit for bit (`Math` as arm64 V8 computes it; node on x86-64 differs in the last bit for 0.02–0.75% of arguments of 17 functions, see `jsmath`) |
 | resource budgets, the per-call ledger, byte-bounded caches | `budget`, `bcache` | none (aster's own bounds) |
 | loaders | `loader` | vega-loader's policy |

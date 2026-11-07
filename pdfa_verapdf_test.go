@@ -253,8 +253,7 @@ func TestPDFAEmbeddableVeraPDF(t *testing.T) {
 
 // TestCIDSetVeraPDF: the CIDSets of the default PDF (no PDF/A option) are
 // exact by veraPDF, in a PDF/A-1b, -2b and -2u document: an embedded
-// TrueType subset's (every glyph slot of the program) and a name-keyed CFF
-// subset's (CID 0 alone). Other rules are not this test's: the default PDF
+// TrueType subset's, and a name-keyed CFF subset's, which pdf0 leaves out. Other rules are not this test's: the default PDF
 // is not made for PDF/A.
 func TestCIDSetVeraPDF(t *testing.T) {
 	cmd := veraPDFCommand(t)
@@ -293,7 +292,9 @@ func TestCIDSetVeraPDF(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !bytes.Contains(pdf, []byte("/CIDSet")) {
+			// A name-keyed CFF has no CIDs to list, and pdf0 writes no
+			// CIDSet for one; every TrueType subset has one.
+			if name != "cff" && !bytes.Contains(pdf, []byte("/CIDSet")) {
 				t.Fatalf("%s: no CIDSet to check", name)
 			}
 			if err := os.WriteFile(filepath.Join(dir, name+".pdf"), inPDFADocument(t, pdf, lv.level), 0o644); err != nil {
@@ -302,6 +303,13 @@ func TestCIDSetVeraPDF(t *testing.T) {
 		}
 		for name, failed := range veraPDF(t, cmd, lv.flavour, dir) {
 			for _, f := range failed {
+				// PDF/A-1 wants a CIDSet on every subset CIDFont, and pdf0
+				// writes one for a name-keyed CFF only when told the document
+				// is PDF/A-1 (fonts.Forms.PDFA1), which the default PDF,
+				// transparent as it is, never is.
+				if lv.flavour == "1b" && name == "cff.pdf" && strings.HasPrefix(f, "6.3.5-3") {
+					continue
+				}
 				if strings.HasPrefix(f, "6.3.5-") || strings.HasPrefix(f, "6.2.11.4.2-") {
 					t.Errorf("PDF/A-%s, %s: %s", lv.flavour, name, f)
 				}
