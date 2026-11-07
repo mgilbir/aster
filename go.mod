@@ -3,9 +3,9 @@ module github.com/mgilbir/aster
 go 1.27.0
 
 require (
-	github.com/mgilbir/forme v0.15.0
+	github.com/mgilbir/forme v0.15.1
 	github.com/mgilbir/goecma262 v0.3.3
-	github.com/mgilbir/pdf0 v0.8.0
+	github.com/mgilbir/pdf0 v0.9.0
 	golang.org/x/image v0.47.0
 	golang.org/x/text v0.43.0
 )
