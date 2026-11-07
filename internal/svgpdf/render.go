@@ -11,6 +11,7 @@ import (
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/text"
+	"github.com/mgilbir/pdf0/fonts"
 )
 
 // gstate carries the inherited graphics state down the element tree.
@@ -196,11 +197,12 @@ type renderer struct {
 	famSrc string
 	fam    []string
 
-	// Reused by drawTextRunFont and mapRun.
-	gidBuf     []uint16
-	tjBuf      []tjItem
-	clusterBuf []int
-	textTotal  int // text bytes shaped so far
+	// Reused by drawTextRunFont and recordRun.
+	gidBuf    []uint16
+	tjBuf     []tjItem
+	glyphBuf  []fonts.Glyph
+	recBuf    []fonts.Segment
+	textTotal int // text bytes shaped so far
 }
 
 // The per-render caches of glyph outlines and painted colour glyphs keep
@@ -269,7 +271,6 @@ func render(root *element, shaper TextShaper, fetched map[string][]byte, opts Op
 	r.images.ctx = opts.Context
 	if opts.Text != TextOutlines && shaper != nil {
 		r.fonts = newFontCatalog(opts.Context, opts.Text, shaper)
-		r.fonts.noCIDSet = opts.PDFA
 	}
 
 	// SVG's y axis points down, PDF's points up. A global flip mapping

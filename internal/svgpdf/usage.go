@@ -102,21 +102,31 @@ func (c *fontCatalog) usage() []FontUsage {
 	}
 	out := make([]FontUsage, 0, len(c.list))
 	for _, f := range c.list {
-		if len(f.used) == 0 {
+		gids := f.used()
+		if len(gids) == 0 {
 			continue
 		}
 		out = append(out, FontUsage{
-			// The same name /BaseFont carries in TextNamed output (including
-			// the PostScriptNameOrFallback rule for fonts without a PostScript
-			// name), so matching holds by construction.
-			PostScriptName: f.baseFontName(TextNamed),
+			// The same name /BaseFont carries in TextNamed output ("Embedded"
+			// for a font without a PostScript name; see PostScriptNameOf), so
+			// matching holds by construction.
+			PostScriptName: f.postScriptName(),
 			// Copied: the internal slice aliases process-global bytes (the
 			// embedded fonts' go:embed data, or the caller's WithFont slice);
 			// handing it out mutable across the public API boundary would let
 			// one caller silently corrupt font handling process-wide.
 			Source: append([]byte(nil), f.data...),
-			GIDs:   f.sortedGIDs(),
+			GIDs:   u16(gids),
 		})
+	}
+	return out
+}
+
+// u16 is gids as the uint16 glyph IDs FontUsage reports.
+func u16(gids []int) []uint16 {
+	out := make([]uint16, len(gids))
+	for i, g := range gids {
+		out[i] = uint16(g)
 	}
 	return out
 }

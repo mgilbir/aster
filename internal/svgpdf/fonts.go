@@ -1,18 +1,17 @@
 package svgpdf
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
-	"sort"
-	"unicode/utf16"
+	"slices"
 
+	"github.com/mgilbir/forme/shape"
 	pdf0 "github.com/mgilbir/pdf0"
+	"github.com/mgilbir/pdf0/fonts"
 
 	"github.com/mgilbir/aster/internal/budget"
-	"github.com/mgilbir/aster/internal/fontsubset"
 	"github.com/mgilbir/aster/internal/text"
 )
 
@@ -66,7 +65,7 @@ type Options struct {
 	// 19005-2, -3) can embed it without breaking a rule of the standard:
 	// colour is device-independent (sRGB: DefaultRGB in its resources, the
 	// blending colour space of its transparency groups), images carry no
-	// /Interpolate, embedded fonts no CIDSet, links the print flag, and a
+	// /Interpolate, links the print flag, and a
 	// run of text that would show a font's .notdef glyph is drawn as
 	// outlines, its text kept as ActualText. The document-level parts (file
 	// identifier, XMP metadata, PDF/A identification, output intent) are the
@@ -75,52 +74,37 @@ type Options struct {
 	PDFA bool
 }
 
-// pdfFont accumulates the state of one font resource while rendering.
+// pdfFont is one font resource of the document: a face drawn as PDF text,
+// which pdf0 embeds (or writes by name) from what the drawing recorded.
 type pdfFont struct {
-	res    string // resource name (F0, F1, ...)
-	data   []byte
-	parsed *fontsubset.Font
-	face   *text.Face
-	// embed is set when the font program is embedded (TextEmbed): a subset
-	// of its TrueType outlines, or of its CFF ones (cff).
+	res  string // resource name (F0, F1, ...)
+	face *text.Face
+	// pf is the document's own wrapper of the face (a ShapeClone, adopted):
+	// what its runs record (Record) is what pdf0 writes the font from — the
+	// glyphs used, what each stands for, /W, /CIDSet, the subset.
+	pf *fonts.Face
+	// data is the face's font program as the shaper hands it out (FontData),
+	// charged to the call's ledger: FontUsage reports it.
+	data []byte
+	// embed is set when the font program is embedded (TextEmbed); a font
+	// that is not is written by name (fonts.Forms.Named).
 	embed bool
-	// cff is set when the embedded program is a subset of the font's CFF
-	// outlines, cut by forme's subsetter (FontFile3, CIDFontType0C), and
-	// cid when that font is CID-keyed: its glyphs are addressed by CID.
-	cff, cid bool
 	// outlined is set for a font whose runs are drawn as outlines and
 	// written as invisible text in it, by name (see hiddenFor): in
 	// TextEmbed, a font whose program cannot be embedded.
 	outlined bool
-	used     map[uint16]bool   // by glyph
-	toUni    map[uint16]string // by glyph
-	// checked records, by glyph, whether a glyph can be kept in the
-	// TrueType subset (fontsubset.CheckGlyph), as each is first drawn.
-	checked map[uint16]bool
-}
-
-// code is the number the content stream, the widths and the CIDSet address
-// glyph gid by: its CID in a CID-keyed CFF font, its glyph ID otherwise
-// (Identity, or a CFF without CIDs, whose CIDs are its glyph IDs; ISO
-// 32000-1, 9.7.4.2).
-func (f *pdfFont) code(gid uint16) uint16 {
-	if f.cid {
-		return uint16(f.face.GlyphCode(int(gid)))
-	}
-	return gid
+	// checked records, by glyph, whether the subset can keep it
+	// (fonts.Face.CheckGlyph), as each is first drawn.
+	checked map[int]bool
 }
 
 // fontCatalog resolves shaped faces to PDF font resources, caching failures
 // so unusable faces consistently fall back to outline drawing.
 type fontCatalog struct {
-	// noCIDSet leaves the CIDSet out of embedded fonts (Options.PDFA): PDF/A-2
-	// makes it optional, and a reader that counts the glyphs of a subset
-	// differently from the writer finds one incomplete.
-	noCIDSet bool
-	ctx      context.Context // the call's, whose ledger FontData charges
-	mode     TextMode
-	shaper   TextShaper
-	fonts    map[*text.Face]*pdfFont
+	ctx    context.Context // the call's, whose ledger FontData and embedding charge
+	mode   TextMode
+	shaper TextShaper
+	fonts  map[*text.Face]*pdfFont
 	// hidden are the by-name fonts of faces whose runs, some of them, are
 	// drawn as outlines (see hiddenFor).
 	hidden map[*text.Face]*pdfFont
@@ -143,15 +127,15 @@ func newFontCatalog(ctx context.Context, mode TextMode, shaper TextShaper) *font
 }
 
 // fontFor returns the PDF font for a shaped face, or nil when the face
-// cannot be represented as a PDF font at all (no font program, or one that
-// does not parse: the caller then draws outlines). The error is a limit the
-// font program's bytes exceed.
+// cannot be represented as a PDF font at all (no font program, or one pdf0
+// writes as Type 3 fonts, which the content stream cannot show text in: the
+// caller then draws outlines). The error is a limit the font program's bytes
+// exceed.
 //
-// In TextEmbed a TrueType font is embedded as a subset of its outlines and
-// a CFF one as a subset of its CFF program (C43). One whose program cannot
-// be subset (glyph data that is malformed, .notdef among it) is written by
-// name, its runs drawn as outlines over invisible text in it: the text is
-// still found and copied (C116).
+// In TextEmbed the font is embedded as a subset (C43). One whose program
+// cannot be subset at all (its licence, a fault that refuses every glyph) is
+// written by name, its runs drawn as outlines over invisible text in it: the
+// text is still found and copied (C116).
 func (c *fontCatalog) fontFor(face *text.Face) (*pdfFont, error) {
 	if f, ok := c.fonts[face]; ok {
 		return f, nil
@@ -167,46 +151,69 @@ func (c *fontCatalog) fontFor(face *text.Face) (*pdfFont, error) {
 		c.failed[face] = true
 		return nil, nil
 	}
-	parsed, err := fontsubset.Parse(data)
-	if err != nil {
+	pf, ok := adopt(face)
+	if !ok {
 		c.failed[face] = true
 		return nil, nil
 	}
-	f := c.add(face, data, parsed)
+	f := c.add(face, pf, data)
 	if c.mode == TextEmbed {
-		switch {
-		case parsed.CanSubset():
-			// .notdef is in every subset: a font whose .notdef cannot be
-			// kept cannot be embedded at all.
-			f.embed = parsed.CheckGlyph(0) == nil
-		case parsed.IsCFF():
-			f.embed, f.cff, f.cid = true, true, face.IsCIDKeyed()
-			if fontsubset.Table(data, "CFF ") == nil {
-				// A CFF2 font, which forme embeds as the CFF of its
-				// instance: one it cannot subset has no CFF to fall back
-				// to (see cffProgram).
-				_, _, err := face.SubsetProgram(nil)
-				f.embed = err == nil
-			}
-		}
+		f.embed = faceEmbeddable(f)
 		f.outlined = !f.embed
-		if !f.embed {
-			f.cff, f.cid = false, false
-		}
 	}
 	return f, nil
 }
 
+// adopt is a document's own pdf0 face of face, and whether pdf0 can write
+// text in it: not one it writes as Type 3 fonts (a face of bitmap glyphs
+// only, which has no outlines to embed), whose glyphs are not shown by code.
+func adopt(face *text.Face) (pf *fonts.Face, ok bool) {
+	defer func() {
+		if recover() != nil {
+			pf, ok = nil, false
+		}
+	}()
+	defer face.Guard()()
+	pf = fonts.Adopt(face.ShapeClone())
+	// Colour glyphs are painted here (colour.go) and only their text is
+	// written in the font: a COLR face is embedded as its outlines, as the
+	// font program, not as Type 3 fonts painting the colour again.
+	pf.SetColourGlyphs(false)
+	if _, err := pf.AppendCode(nil, 0); err != nil {
+		return nil, false
+	}
+	return pf, true
+}
+
+// faceEmbeddable reports whether pdf0 can embed f's program at all: a
+// refusal that is not about one glyph's data (shape.GlyphError) refuses
+// every glyph of the face. .notdef that cannot be kept is written empty when
+// nothing shows it.
+func faceEmbeddable(f *pdfFont) bool {
+	err := f.checkGlyph(0)
+	var ge *shape.GlyphError
+	return err == nil || errors.As(err, &ge)
+}
+
+// checkGlyph is fonts.Face.CheckGlyph, guarded.
+func (f *pdfFont) checkGlyph(gid int) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("svgpdf: checking glyph %d: %v", gid, r)
+		}
+	}()
+	defer f.face.Guard()()
+	return f.pf.CheckGlyph(gid)
+}
+
 // add registers a font resource of face.
-func (c *fontCatalog) add(face *text.Face, data []byte, parsed *fontsubset.Font) *pdfFont {
+func (c *fontCatalog) add(face *text.Face, pf *fonts.Face, data []byte) *pdfFont {
 	f := &pdfFont{
 		res:     fmt.Sprintf("F%d", len(c.list)),
-		data:    data,
-		parsed:  parsed,
 		face:    face,
-		used:    make(map[uint16]bool),
-		toUni:   make(map[uint16]string),
-		checked: make(map[uint16]bool),
+		pf:      pf,
+		data:    data,
+		checked: make(map[int]bool),
 	}
 	c.fonts[face] = f
 	c.list = append(c.list, f)
@@ -217,15 +224,14 @@ func (c *fontCatalog) add(face *text.Face, data []byte, parsed *fontsubset.Font)
 // that cannot be kept in f's subset (C116), the face's font by name, in
 // which the run is drawn as outlines over invisible text.
 func (c *fontCatalog) forRun(f *pdfFont, run text.Run) *pdfFont {
-	if f == nil || !f.embed || f.cff {
+	if f == nil || !f.embed {
 		return f
 	}
 	for _, g := range run.Glyphs {
-		gid := uint16(g.GID)
-		ok, seen := f.checked[gid]
+		ok, seen := f.checked[g.GID]
 		if !seen {
-			ok = f.parsed.CheckGlyph(gid) == nil
-			f.checked[gid] = ok
+			ok = f.checkGlyph(g.GID) == nil
+			f.checked[g.GID] = ok
 		}
 		if !ok {
 			return c.hiddenFor(run.Face, f)
@@ -235,306 +241,135 @@ func (c *fontCatalog) forRun(f *pdfFont, run text.Run) *pdfFont {
 }
 
 // hiddenFor is face's font written by name, for the runs drawn as outlines
-// over invisible text: one resource of its own, beside f, the embedded one.
+// over invisible text: one resource of its own, beside f, the embedded one,
+// recording the glyphs of those runs only.
 func (c *fontCatalog) hiddenFor(face *text.Face, f *pdfFont) *pdfFont {
 	if h, ok := c.hidden[face]; ok {
 		return h
 	}
-	h := &pdfFont{
-		res: fmt.Sprintf("F%d", len(c.list)), data: f.data, parsed: f.parsed, face: face, outlined: true,
-		used: make(map[uint16]bool), toUni: make(map[uint16]string), checked: make(map[uint16]bool),
+	pf, ok := adopt(face)
+	if !ok {
+		pf = f.pf // unreachable: f was adopted from the same face
 	}
+	h := &pdfFont{res: fmt.Sprintf("F%d", len(c.list)), face: face, pf: pf, data: f.data, outlined: true, checked: make(map[int]bool)}
 	c.hidden[face] = h
 	c.list = append(c.list, h)
 	return h
 }
 
-// PostScriptNameOrFallback returns the name used as /BaseFont for a font with
-// the given PostScript name ("Unknown" when the font carries none). It is the
-// single source of the fallback rule, shared by the document writer, FontUsage
-// reporting, and the public SubsetFont, so the three always agree.
-func PostScriptNameOrFallback(name string) string {
+// used are the glyphs f's runs recorded, ascending.
+func (f *pdfFont) used() []int {
+	u := slices.Clone(f.pf.Used())
+	slices.Sort(u)
+	return slices.Compact(u)
+}
+
+// postScriptName is the name f is written under by name (TextNamed, and the
+// /BaseFont FontUsage reports): the face's PostScript name, as pdf0 writes it.
+func (f *pdfFont) postScriptName() string {
+	defer f.face.Guard()()
+	return f.pf.Name()
+}
+
+// PostScriptNameOf is the /BaseFont pdf0 writes for a font loaded from source:
+// forme's name for the face, its PostScript name, or "Embedded" when it states
+// none. FontUsage reports the same name and the public SubsetFont returns it,
+// so a document assembled later embeds the program under the name the chart
+// refers to it by. It is read through forme, not parsed again here, so that the
+// two cannot disagree on a name a font states oddly or not at all.
+func PostScriptNameOf(source []byte) (name string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			name, err = "", fmt.Errorf("svgpdf: reading the font's PostScript name: %v", r)
+		}
+	}()
+	face, err := shape.Load(source)
+	if err != nil {
+		return "", err
+	}
+	return face.Name(), nil
+}
+
+// PostScriptNameOrEmbedded is forme's fallback for a font that states no
+// PostScript name, for a name read some other way than through forme.
+func PostScriptNameOrEmbedded(name string) string {
 	if name == "" {
-		return "Unknown"
+		return "Embedded"
 	}
 	return name
 }
 
-// baseFontName builds the /BaseFont value. Embedded subsets carry the
-// spec-mandated 6-letter subset prefix, derived deterministically from the
-// font bytes and the used glyph set.
-func (f *pdfFont) baseFontName(mode TextMode) string {
-	name := PostScriptNameOrFallback(f.parsed.PostScriptName())
-	if mode != TextEmbed || !f.embed {
-		return name
-	}
-	h := sha256.New()
-	h.Write(f.data)
-	for _, g := range f.sortedGIDs() {
-		h.Write([]byte{byte(g >> 8), byte(g)})
-	}
-	sum := h.Sum(nil)
-	prefix := make([]byte, 6)
-	for i := range prefix {
-		prefix[i] = 'A' + sum[i]%26
-	}
-	return string(prefix) + "+" + name
+// allocator numbers the objects pdf0 writes for the fonts in the document's
+// own sequence (fonts.Allocator).
+type allocator struct {
+	objects map[int]*pdf0.IndirectObject
+	next    int
 }
 
-func (f *pdfFont) sortedGIDs() []uint16 {
-	gids := make([]uint16, 0, len(f.used))
-	for g := range f.used {
-		gids = append(gids, g)
-	}
-	sort.Slice(gids, func(i, j int) bool { return gids[i] < gids[j] })
-	return gids
+func (a *allocator) Add(v pdf0.Object) pdf0.IndirectRef {
+	n := a.next
+	a.next++
+	a.objects[n] = &pdf0.IndirectObject{Number: n, Value: v}
+	return pdf0.IndirectRef{Number: n}
 }
 
-// coded is a glyph and its code (see code).
-type coded struct{ code, gid uint16 }
-
-// sortedCodes are the glyphs used, by code.
-func (f *pdfFont) sortedCodes() []coded {
-	gids := f.sortedGIDs()
-	out := make([]coded, len(gids))
-	for i, g := range gids {
-		out[i] = coded{f.code(g), g}
-	}
-	if f.cid {
-		sort.Slice(out, func(i, j int) bool { return out[i].code < out[j].code })
-	}
-	return out
-}
-
-// widthsArray builds the CIDFont /W array: runs of consecutive codes with
-// their glyphs' advances in glyph space (1000 units per em).
-func (f *pdfFont) widthsArray() pdf0.Array {
-	cs := f.sortedCodes()
-	upem := float64(f.parsed.UnitsPerEm())
-	var out pdf0.Array
-	for i := 0; i < len(cs); {
-		j := i
-		for j+1 < len(cs) && cs[j+1].code == cs[j].code+1 {
-			j++
-		}
-		var ws pdf0.Array
-		for k := i; k <= j; k++ {
-			w := float64(f.parsed.Advance(cs[k].gid)) * 1000 / upem
-			ws = append(ws, pdf0.Real(w))
-		}
-		out = append(out, pdf0.Integer(cs[i].code), ws)
-		i = j + 1
-	}
-	return out
-}
-
-// toUnicodeCMap renders the ToUnicode CMap stream content for text
-// extraction (copy/paste, search) from the glyph→text mapping collected
-// during rendering.
-func (f *pdfFont) toUnicodeCMap() []byte {
-	var b bytes.Buffer
-	b.WriteString(`/CIDInit /ProcSet findresource begin
-12 dict begin
-begincmap
-/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def
-/CMapName /Adobe-Identity-UCS def
-/CMapType 2 def
-1 begincodespacerange
-<0000> <FFFF>
-endcodespacerange
-`)
-	var mapped []coded
-	for _, c := range f.sortedCodes() {
-		if f.toUni[c.gid] != "" {
-			mapped = append(mapped, c)
-		}
-	}
-	// The spec caps bfchar blocks at 100 entries.
-	for i := 0; i < len(mapped); i += 100 {
-		n := min(100, len(mapped)-i)
-		fmt.Fprintf(&b, "%d beginbfchar\n", n)
-		for _, c := range mapped[i : i+n] {
-			fmt.Fprintf(&b, "<%04X> <", c.code)
-			for _, u := range utf16.Encode([]rune(f.toUni[c.gid])) {
-				fmt.Fprintf(&b, "%04X", u)
-			}
-			b.WriteString(">\n")
-		}
-		b.WriteString("endbfchar\n")
-	}
-	b.WriteString(`endcmap
-CMapName currentdict /CMap defineresource pop
-end
-end
-`)
-	return b.Bytes()
-}
-
-// buildFontObjects creates the PDF objects for every font in the catalog,
-// numbering them sequentially from nextNum. It returns the objects, the
-// /Font resource dictionary, and the next free object number.
-func buildFontObjects(catalog *fontCatalog, nextNum int) (map[int]*pdf0.IndirectObject, *pdf0.Dictionary, int, error) {
-	objects := make(map[int]*pdf0.IndirectObject)
+// buildFontObjects has pdf0 write every font of the catalog that a run
+// recorded glyphs in, numbering the objects from nextNum: embedded as a
+// subset (TextEmbed) or by name (TextNamed, and the fonts of runs drawn as
+// outlines over invisible text). It returns the objects, the /Font resource
+// dictionary, the next free object number, and the least PDF version the
+// fonts need. A CFF program is written bare (CIDFontType0C, PDF 1.3), so the
+// fonts need no more than the document's 1.4.
+//
+// Each subset is bounded: its bytes by twice the font program and 64 KiB,
+// which is charged to the call's ledger while it is made, its work by
+// forme's default, and the call's context stops it.
+func buildFontObjects(catalog *fontCatalog, nextNum int) (map[int]*pdf0.IndirectObject, *pdf0.Dictionary, int, string, error) {
+	alloc := &allocator{objects: make(map[int]*pdf0.IndirectObject), next: nextNum}
 	fontRes := &pdf0.Dictionary{}
-	add := func(v pdf0.Object) pdf0.IndirectRef {
-		n := nextNum
-		nextNum++
-		objects[n] = &pdf0.IndirectObject{Number: n, Value: v}
-		return pdf0.IndirectRef{Number: n}
-	}
-
+	version := "1.1"
 	for _, f := range catalog.list {
-		if len(f.used) == 0 {
+		if len(f.pf.Used()) == 0 {
 			continue
 		}
-		baseName := f.baseFontName(catalog.mode)
-		m := f.parsed.Metrics()
-		scale := 1000 / float64(f.parsed.UnitsPerEm())
-
-		descriptor := &pdf0.Dictionary{}
-		descriptor.Set("Type", pdf0.Name("FontDescriptor"))
-		descriptor.Set("FontName", pdf0.Name(baseName))
-		flags := 1 << 2 // Symbolic: glyphs addressed by ID, outside StandardEncoding
-		if m.FixedPitch {
-			flags |= 1 << 0
-		}
-		descriptor.Set("Flags", pdf0.Integer(flags))
-		descriptor.Set("FontBBox", pdf0.Array{
-			pdf0.Real(float64(m.BBox[0]) * scale), pdf0.Real(float64(m.BBox[1]) * scale),
-			pdf0.Real(float64(m.BBox[2]) * scale), pdf0.Real(float64(m.BBox[3]) * scale),
-		})
-		descriptor.Set("ItalicAngle", pdf0.Real(m.ItalicAngle))
-		descriptor.Set("Ascent", pdf0.Real(float64(m.Ascent)*scale))
-		descriptor.Set("Descent", pdf0.Real(float64(m.Descent)*scale))
-		descriptor.Set("CapHeight", pdf0.Real(float64(m.CapHeight)*scale))
-		// StemV is required but absent from TrueType fonts; 80 is the
-		// customary text-weight estimate.
-		descriptor.Set("StemV", pdf0.Integer(80))
-
-		if catalog.mode == TextEmbed && f.embed {
-			program, codes, err := catalog.program(f)
-			if err != nil {
-				return nil, nil, 0, fmt.Errorf("svgpdf: embedding %s: %w", baseName, err)
-			}
-			compressed, err := flateCompress(program)
-			if err != nil {
-				return nil, nil, 0, err
-			}
-			fontFile := &pdf0.Stream{Data: compressed}
-			fontFile.Dict.Set("Length", pdf0.Integer(len(compressed)))
-			fontFile.Dict.Set("Filter", pdf0.Name("FlateDecode"))
-			if f.cff {
-				// A bare CFF program (ISO 32000-1, Table 126).
-				fontFile.Dict.Set("Subtype", pdf0.Name("CIDFontType0C"))
-				descriptor.Set("FontFile3", add(fontFile))
-			} else {
-				fontFile.Dict.Set("Length1", pdf0.Integer(len(program)))
-				descriptor.Set("FontFile2", add(fontFile))
-			}
-
-			// CIDSet: the CIDs the font program holds, which PDF/A-1
-			// requires for a subset CIDFont (ISO 19005-1, 6.3.5) and
-			// PDF/A-2 and -3 require to be exact when present (ISO
-			// 19005-2, 6.2.11.4.2). Bit 0 of byte 0 is the high bit.
-			// A TrueType program through the Identity CIDToGIDMap has as
-			// its CIDs every glyph slot it declares, the empty ones
-			// included, as veraPDF reads it (its long metrics, which are
-			// no more than its glyphs): the subset keeps every slot of
-			// the font, emptied where a glyph is not kept, so the set is
-			// every slot of the written program (sfntGlyphs). A
-			// CID-keyed CFF program's are the CIDs of the glyphs the
-			// subset keeps, the components of composites among them
-			// (C114). A CFF program that is not CID-keyed has none, as
-			// veraPDF reads it (it fails PDF/A-2 on a set listing its
-			// glyphs and passes PDF/A-1b, -2b and -2u on one listing CID 0
-			// alone), so its set lists CID 0 only.
-			if !catalog.noCIDSet {
-				top := -1
-				for _, c := range codes {
-					top = max(top, int(c))
-				}
-				var slots int
-				if !f.cff {
-					slots = sfntGlyphs(program)
-					top = max(top, slots-1)
-				}
-				bitmap := make([]byte, top/8+1)
-				for _, c := range codes {
-					if f.cff && !f.cid && c != 0 {
-						continue // a CFF that is not CID-keyed has no CIDs: see above
-					}
-					bitmap[c/8] |= 0x80 >> (c % 8)
-				}
-				for c := 0; c < slots; c++ {
-					bitmap[c/8] |= 0x80 >> (c % 8)
-				}
-				compressedSet, err := flateCompress(bitmap)
-				if err != nil {
-					return nil, nil, 0, err
-				}
-				cidSet := &pdf0.Stream{Data: compressedSet}
-				cidSet.Dict.Set("Length", pdf0.Integer(len(compressedSet)))
-				cidSet.Dict.Set("Filter", pdf0.Name("FlateDecode"))
-				descriptor.Set("CIDSet", add(cidSet))
-			}
-		}
-		descRef := add(descriptor)
-
-		// A CID-keyed font's own character collection, whose CIDs the
-		// codes are; Identity otherwise. Identity-H suits either.
-		registry, ordering, supplement := "Adobe", "Identity", 0
-		if f.cid {
-			if r, o, s, ok := f.face.CharacterCollection(); ok {
-				registry, ordering, supplement = r, o, s
-			}
-		}
-		cidSystem := &pdf0.Dictionary{}
-		cidSystem.Set("Registry", pdf0.String{Value: []byte(registry)})
-		cidSystem.Set("Ordering", pdf0.String{Value: []byte(ordering)})
-		cidSystem.Set("Supplement", pdf0.Integer(supplement))
-
-		cidFont := &pdf0.Dictionary{}
-		cidFont.Set("Type", pdf0.Name("Font"))
-		// A CFF font's CIDFont is a CIDFontType0 (ISO 32000-2, 9.7.4.1).
-		if f.parsed.IsCFF() {
-			cidFont.Set("Subtype", pdf0.Name("CIDFontType0"))
-		} else {
-			cidFont.Set("Subtype", pdf0.Name("CIDFontType2"))
-		}
-		cidFont.Set("BaseFont", pdf0.Name(baseName))
-		cidFont.Set("CIDSystemInfo", cidSystem)
-		cidFont.Set("FontDescriptor", descRef)
-		// Content-stream glyph codes ARE glyph IDs of the (subset) font
-		// program: the sparse subset preserves original glyph numbering.
-		// (A CIDFontType0 has no CIDToGIDMap: its codes are CIDs, mapped
-		// to glyphs by its charset, or glyph indices for a CFF without
-		// one; see code.)
-		if !f.parsed.IsCFF() {
-			cidFont.Set("CIDToGIDMap", pdf0.Name("Identity"))
-		}
-		cidFont.Set("W", f.widthsArray())
-		cidRef := add(cidFont)
-
-		cmap := f.toUnicodeCMap()
-		compressedCMap, err := flateCompress(cmap)
+		emb, err := catalog.embed(f, alloc)
 		if err != nil {
-			return nil, nil, 0, err
+			return nil, nil, 0, "", err
 		}
-		toUni := &pdf0.Stream{Data: compressedCMap}
-		toUni.Dict.Set("Length", pdf0.Integer(len(compressedCMap)))
-		toUni.Dict.Set("Filter", pdf0.Name("FlateDecode"))
-		toUniRef := add(toUni)
-
-		type0 := &pdf0.Dictionary{}
-		type0.Set("Type", pdf0.Name("Font"))
-		type0.Set("Subtype", pdf0.Name("Type0"))
-		type0.Set("BaseFont", pdf0.Name(baseName))
-		type0.Set("Encoding", pdf0.Name("Identity-H"))
-		type0.Set("DescendantFonts", pdf0.Array{cidRef})
-		type0.Set("ToUnicode", toUniRef)
-		fontRes.Set(pdf0.Name(f.res), add(type0))
+		fontRes.Set(pdf0.Name(f.res), emb.Horizontal)
+		if emb.Version > version {
+			version = emb.Version
+		}
 	}
-	return objects, fontRes, nextNum, nil
+	return alloc.objects, fontRes, alloc.next, version, nil
+}
+
+// embed has pdf0 write f's font objects through alloc.
+func (c *fontCatalog) embed(f *pdfFont, alloc *allocator) (emb fonts.Embedded, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			emb, err = fonts.Embedded{}, fmt.Errorf("svgpdf: embedding a font: %v", r)
+		}
+	}()
+	forms := fonts.Forms{Horizontal: true, BareCFF: true, Named: !f.embed}
+	var limits fonts.SubsetLimits
+	if f.embed {
+		limits.MaxBytes = 2*len(f.data) + 64<<10
+		l := budget.LedgerFrom(c.ctx)
+		if err := l.Alloc(int64(limits.MaxBytes)); err != nil {
+			return fonts.Embedded{}, err
+		}
+		defer l.Free(int64(limits.MaxBytes))
+	}
+	defer f.face.Guard()()
+	emb, err = f.pf.EmbedFormsContext(c.ctx, alloc, forms, limits)
+	if err != nil {
+		if errors.Is(err, fonts.ErrSubsetLimit) {
+			return fonts.Embedded{}, fmt.Errorf("svgpdf: embedding %s: %w: %w", f.postScriptName(), budget.ErrLimit, err)
+		}
+		return fonts.Embedded{}, fmt.Errorf("svgpdf: embedding %s: %w", f.postScriptName(), err)
+	}
+	return emb, nil
 }
 
 func flateCompress(data []byte) ([]byte, error) {
@@ -545,64 +380,18 @@ func flateCompress(data []byte) ([]byte, error) {
 	return b, nil
 }
 
-// program is the font program f embeds, and the codes of the glyphs it
-// holds, for its CIDSet. The bytes it makes are bounded by the font's own,
-// which are charged to the call's ledger while it is made.
-func (c *fontCatalog) program(f *pdfFont) (program []byte, codes []uint16, err error) {
-	l := budget.LedgerFrom(c.ctx)
-	if err := l.Alloc(int64(len(f.data))); err != nil {
-		return nil, nil, err
-	}
-	defer l.Free(int64(len(f.data)))
-	if f.cff {
-		return f.cffProgram()
-	}
-	// Every glyph used was checked as it was drawn (forRun): the subset
-	// cannot fail on one.
-	program, kept, err := f.parsed.SubsetKept(f.used)
+// code is the two-byte character code glyph gid is shown with in f's font
+// (fonts.Face.AppendCode): its glyph index, or its CID in a CID-keyed CFF
+// font, the number /W, /CIDSet and the ToUnicode map are keyed by.
+func (f *pdfFont) code(gid int) (uint16, error) {
+	defer f.face.Guard()()
+	var buf [2]byte
+	b, err := f.pf.AppendCode(buf[:0], gid)
 	if err != nil {
-		return nil, nil, err
+		return 0, fmt.Errorf("svgpdf: the code of glyph %d: %w", gid, err)
 	}
-	for g := range kept {
-		codes = append(codes, g)
+	if len(b) != 2 {
+		return 0, fmt.Errorf("svgpdf: glyph %d has a %d-byte code, not a composite font's two", gid, len(b))
 	}
-	return program, codes, nil
-}
-
-// cffProgram is the CFF program of f's subset, cut by forme's subsetter,
-// and the codes of the glyphs it holds. A subset forme cannot cut (a glyph
-// it cannot write as CFF) falls back to the font's whole CFF program, which
-// holds every glyph, at the codes the content addresses them by.
-func (f *pdfFont) cffProgram() (program []byte, codes []uint16, err error) {
-	gids := f.sortedGIDs()
-	want := make([]int, len(gids))
-	for i, g := range gids {
-		want[i] = int(g)
-	}
-	if sub, kept, err := f.face.SubsetProgram(want); err == nil {
-		if cff := fontsubset.Table(sub, "CFF "); cff != nil {
-			for _, g := range kept {
-				codes = append(codes, f.code(uint16(g)))
-			}
-			return cff, codes, nil
-		}
-	}
-	cff := fontsubset.Table(f.data, "CFF ")
-	if cff == nil {
-		return nil, nil, fmt.Errorf("svgpdf: the font has no CFF program to embed")
-	}
-	for g := range f.parsed.NumGlyphs() {
-		codes = append(codes, f.code(uint16(g)))
-	}
-	return cff, codes, nil
-}
-
-// sfntGlyphs is the glyph count (maxp numGlyphs) of a TrueType program, 0
-// when it has no readable maxp.
-func sfntGlyphs(program []byte) int {
-	maxp := fontsubset.Table(program, "maxp")
-	if len(maxp) < 6 {
-		return 0
-	}
-	return int(binary.BigEndian.Uint16(maxp[4:]))
+	return binary.BigEndian.Uint16(b), nil
 }

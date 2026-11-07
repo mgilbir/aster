@@ -322,10 +322,25 @@ func TestCIDSetOfNameKeyedCFF(t *testing.T) {
 	if len(ds) != 1 || ds[0].Get("FontFile3") == nil {
 		t.Fatalf("%d font descriptors, want one of an embedded CFF program", len(ds))
 	}
-	set := streamData(t, doc, ds[0].Get("CIDSet"))
-	for g := 1; g < 8*len(set); g++ {
-		if set[g/8]&(0x80>>(g%8)) != 0 {
-			t.Errorf("the CIDSet of a name-keyed CFF lists CID %d", g)
+	// pdf0 writes none for such a program outside PDF/A-1: it has no CIDs
+	// to list, and a set of CID 0 alone says nothing more.
+	if set := ds[0].Get("CIDSet"); set != nil {
+		for g, b := range streamData(t, doc, set) {
+			for bit := range 8 {
+				if c := 8*g + bit; c > 0 && b&(0x80>>bit) != 0 {
+					t.Errorf("the CIDSet of a name-keyed CFF lists CID %d", c)
+				}
+			}
 		}
 	}
+}
+
+// sfntGlyphs is the glyph count (maxp numGlyphs) of a TrueType program, 0
+// when it has no readable maxp.
+func sfntGlyphs(program []byte) int {
+	maxp := fontsubset.Table(program, "maxp")
+	if len(maxp) < 6 {
+		return 0
+	}
+	return int(binary.BigEndian.Uint16(maxp[4:]))
 }
