@@ -271,32 +271,51 @@ func (f *pdfFont) postScriptName() string {
 	return f.pf.Name()
 }
 
-// PostScriptNameOf is the /BaseFont pdf0 writes for a font loaded from source:
-// forme's name for the face, its PostScript name, or "Embedded" when it states
-// none. FontUsage reports the same name and the public SubsetFont returns it,
-// so a document assembled later embeds the program under the name the chart
-// refers to it by. It is read through forme, not parsed again here, so that the
-// two cannot disagree on a name a font states oddly or not at all.
-func PostScriptNameOf(source []byte) (name string, err error) {
+// SubsetFont is aster.SubsetFont: forme's subset of source keeping gids (and
+// .notdef and the components of the composites among them), numbered as source
+// numbers its glyphs, which is how pdf0 embeds a TrueType face. name is what
+// pdf0 writes the font by, so it is what FontUsage reports and the /BaseFont of
+// TextNamed output: forme's PostScript name for the face, "Embedded" where the
+// font states none. A glyph index source does not have is ignored.
+//
+// Only a face of TrueType outlines is subset: a CFF one, whose program a PDF
+// carries differently, and one of bitmap glyphs only are refused. The subset
+// is bounded as one svgpdf embeds is: its bytes by twice the font program and
+// 64 KiB, its work by forme's default.
+func SubsetFont(source []byte, gids []uint16) (program []byte, name string, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			name, err = "", fmt.Errorf("svgpdf: reading the font's PostScript name: %v", r)
+			program, err = nil, fmt.Errorf("svgpdf: internal error subsetting a font: %v", r)
 		}
 	}()
-	face, err := shape.Load(source)
+	// An embedded font (the common case: a chart in Liberation) is a clone of
+	// its parse made once per process; any other is read here.
+	face, ok := text.EmbeddedShapeFace(source)
+	if !ok {
+		if face, err = shape.Load(source); err != nil {
+			return nil, "", err
+		}
+	}
+	name = face.Name()
+	switch {
+	case face.IsCFF():
+		return nil, name, errors.New("its outlines are CFF, not TrueType")
+	case face.BitmapOnly():
+		return nil, name, errors.New("its glyphs are bitmaps, with no outlines")
+	}
+	use := make([]int, len(gids))
+	for i, g := range gids {
+		use[i] = int(g)
+	}
+	face.Use(use...) // an index the face does not have is not recorded
+	program, _, err = face.SubsetGlyphsContext(context.Background(), shape.SubsetLimits{MaxBytes: 2*len(source) + 64<<10})
+	if errors.Is(err, shape.ErrSubsetLimit) {
+		err = fmt.Errorf("%w: %w", budget.ErrLimit, err)
+	}
 	if err != nil {
-		return "", err
+		return nil, name, err
 	}
-	return face.Name(), nil
-}
-
-// PostScriptNameOrEmbedded is forme's fallback for a font that states no
-// PostScript name, for a name read some other way than through forme.
-func PostScriptNameOrEmbedded(name string) string {
-	if name == "" {
-		return "Embedded"
-	}
-	return name
+	return program, name, nil
 }
 
 // allocator numbers the objects pdf0 writes for the fonts in the document's

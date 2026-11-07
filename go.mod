@@ -6,7 +6,6 @@ require (
 	github.com/mgilbir/forme v0.16.0
 	github.com/mgilbir/goecma262 v0.3.3
 	github.com/mgilbir/pdf0 v0.9.1
-	golang.org/x/image v0.47.0
 	golang.org/x/text v0.43.0
 )
 

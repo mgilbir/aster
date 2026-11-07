@@ -351,27 +351,7 @@ func New(opts ...Option) (*Measurer, error) {
 
 	// Embedded fonts are registered first; Noto Emoji last among them so it
 	// is only reached for runes nothing else covers.
-	for _, e := range []struct {
-		data   []byte
-		id     string
-		family string
-		weight int
-		italic bool
-	}{
-		{liberation.SansRegular, "liberation-sans", "Liberation Sans", 400, false},
-		{liberation.SansBold, "liberation-sans-bold", "Liberation Sans", 700, false},
-		{liberation.SansItalic, "liberation-sans-italic", "Liberation Sans", 400, true},
-		{liberation.SansBoldItalic, "liberation-sans-bolditalic", "Liberation Sans", 700, true},
-		{liberation.MonoRegular, "liberation-mono", "Liberation Mono", 400, false},
-		{liberation.MonoBold, "liberation-mono-bold", "Liberation Mono", 700, false},
-		{liberation.MonoItalic, "liberation-mono-italic", "Liberation Mono", 400, true},
-		{liberation.MonoBoldItalic, "liberation-mono-bolditalic", "Liberation Mono", 700, true},
-		{liberation.SerifRegular, "liberation-serif", "Liberation Serif", 400, false},
-		{liberation.SerifBold, "liberation-serif-bold", "Liberation Serif", 700, false},
-		{liberation.SerifItalic, "liberation-serif-italic", "Liberation Serif", 400, true},
-		{liberation.SerifBoldItalic, "liberation-serif-bolditalic", "Liberation Serif", 700, true},
-		{notoemoji.Regular, "noto-emoji", notoemoji.Family, 400, false},
-	} {
+	for _, e := range embeddedFonts {
 		f, err := embeddedFace(e.id, e.family, e.weight, e.italic, e.data)
 		if err != nil {
 			return nil, fmt.Errorf("text: embedded font %s: %w", e.id, err)
@@ -888,4 +868,29 @@ func pangoAdvance(g *shape.Glyph, size, upem float64, trunc bool) float64 {
 	base := math.Round((g.XAdvance - g.XAdjust) * upem / 1000)
 	kern := math.Round(g.XAdjust * upem / 1000)
 	return (emScale(base, size, upem, trunc) + emScale(kern, size, upem, trunc)) / pangoUnit
+}
+
+// embeddedFonts are the fonts every Measurer has, in the order they are
+// registered: Noto Emoji last, so it is only reached for runes nothing else
+// covers.
+var embeddedFonts = []struct {
+	data   []byte
+	id     string
+	family string
+	weight int
+	italic bool
+}{
+	{liberation.SansRegular, "liberation-sans", "Liberation Sans", 400, false},
+	{liberation.SansBold, "liberation-sans-bold", "Liberation Sans", 700, false},
+	{liberation.SansItalic, "liberation-sans-italic", "Liberation Sans", 400, true},
+	{liberation.SansBoldItalic, "liberation-sans-bolditalic", "Liberation Sans", 700, true},
+	{liberation.MonoRegular, "liberation-mono", "Liberation Mono", 400, false},
+	{liberation.MonoBold, "liberation-mono-bold", "Liberation Mono", 700, false},
+	{liberation.MonoItalic, "liberation-mono-italic", "Liberation Mono", 400, true},
+	{liberation.MonoBoldItalic, "liberation-mono-bolditalic", "Liberation Mono", 700, true},
+	{liberation.SerifRegular, "liberation-serif", "Liberation Serif", 400, false},
+	{liberation.SerifBold, "liberation-serif-bold", "Liberation Serif", 700, false},
+	{liberation.SerifItalic, "liberation-serif-italic", "Liberation Serif", 400, true},
+	{liberation.SerifBoldItalic, "liberation-serif-bolditalic", "Liberation Serif", 700, true},
+	{notoemoji.Regular, "noto-emoji", notoemoji.Family, 400, false},
 }

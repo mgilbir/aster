@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/mgilbir/aster/internal/budget"
-	"github.com/mgilbir/aster/internal/fontsubset"
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/loader"
@@ -1101,32 +1100,20 @@ func (c *Converter) VegaLiteToPDFUsage(spec []byte, opts ...PDFOption) ([]byte, 
 // It returns the subset program and the source's PostScript name (matching the
 // PostScriptName reported by FontUsage and the /BaseFont PDFTextNamed writes;
 // "Embedded" for a font that carries no PostScript name).
+// The subset is the one PDFTextEmbed embeds, made by forme: the glyphs asked
+// for, .notdef and the components of composite glyphs, with no hinting, no
+// glyph names, and the name table cut to the font's notices and names.
 // Only fonts with TrueType glyph outlines can be subset; others return an
 // error. Glyph IDs outside the font's range are ignored — GIDs sourced from
 // FontUsage are always in range, but hand-built inputs are not validated.
 func SubsetFont(source []byte, gids []uint16) (subset []byte, postScriptName string, err error) {
-	f, err := fontsubset.Parse(source)
-	if err != nil {
+	subset, postScriptName, err = svgpdf.SubsetFont(source, gids)
+	switch {
+	case err == nil:
+		return subset, postScriptName, nil
+	case postScriptName == "":
 		return nil, "", fmt.Errorf("aster: parse font: %w", err)
+	default:
+		return nil, postScriptName, fmt.Errorf("aster: font %q cannot be subset: %w", postScriptName, err)
 	}
-	// The name a chart refers to the font by, which pdf0 takes from forme. A
-	// font forme cannot load is one no chart drew with — such as a subset
-	// SubsetFont made, which carries no cmap — and is named by the same rule
-	// from its own name table.
-	name, err := svgpdf.PostScriptNameOf(source)
-	if err != nil {
-		name = svgpdf.PostScriptNameOrEmbedded(f.PostScriptName())
-	}
-	if err := f.SubsetErr(); err != nil {
-		return nil, name, fmt.Errorf("aster: font %q cannot be subset: %w", name, err)
-	}
-	set := make(map[uint16]bool, len(gids))
-	for _, g := range gids {
-		set[g] = true
-	}
-	sub, err := f.Subset(set)
-	if err != nil {
-		return nil, name, fmt.Errorf("aster: subset font: %w", err)
-	}
-	return sub, name, nil
 }
