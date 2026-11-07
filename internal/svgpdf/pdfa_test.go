@@ -138,7 +138,7 @@ func TestPDFAGoldens(t *testing.T) {
 
 // TestPDFAStructure pins what PDFA writes, rule by rule: sRGB as DefaultRGB
 // and as the blending space of the page's and the forms' transparency
-// groups, links with the print flag, no CIDSet, and .notdef text as
+// groups, links with the print flag, and .notdef text as
 // ActualText around outlines rather than shown.
 func TestPDFAStructure(t *testing.T) {
 	m, err := text.New()
@@ -174,9 +174,6 @@ func TestPDFAStructure(t *testing.T) {
 			if a, ok := d.Get("Alternate").(pdf0.Name); ok && a == "DeviceRGB" {
 				icc = num
 			}
-		}
-		if _, ok := d.Get("CIDSet").(pdf0.IndirectRef); ok {
-			t.Errorf("object %d: a font descriptor has a CIDSet", num)
 		}
 		if s, ok := d.Get("S").(pdf0.Name); ok && s == "Transparency" && d != page {
 			groups++

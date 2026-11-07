@@ -7,6 +7,8 @@ import (
 	"encoding/binary"
 	"os"
 	"testing"
+
+	"github.com/mgilbir/pdf0"
 )
 
 // setPSName rewrites the PostScript name (name ID 6, Windows UTF-16BE record)
@@ -77,5 +79,90 @@ func TestPDFFontNameInjection(t *testing.T) {
 	_, name, err := SubsetFont(font, []uint16{0, 1, 2})
 	if err == nil && bytes.ContainsAny([]byte(name), "()<>/ []%#") {
 		t.Errorf("SubsetFont returned an unsanitized PostScript name %q", name)
+	}
+}
+
+// dropPSName renames every PostScript name record (name ID 6) of a TrueType
+// font to an ID nothing reads, so the font states no PostScript name.
+func dropPSName(t *testing.T, font []byte) []byte {
+	t.Helper()
+	b := append([]byte(nil), font...)
+	for _, tb := range sfntTables(b) {
+		if tb.tag != "name" {
+			continue
+		}
+		nm := b[tb.off : tb.off+tb.length]
+		count := int(binary.BigEndian.Uint16(nm[2:]))
+		for i := 0; i < count; i++ {
+			r := nm[6+i*12:]
+			if binary.BigEndian.Uint16(r[6:]) == 6 {
+				binary.BigEndian.PutUint16(r[6:], 0x99)
+			}
+		}
+		return b
+	}
+	t.Fatal("no name table")
+	return nil
+}
+
+// TestFontNameAgreesAcrossUsageSubsetAndPDF: a document assembled later embeds
+// SubsetFont's program under the name SubsetFont returns, for the font a
+// PDFTextNamed chart refers to by /BaseFont and FontUsage reports. The three
+// must be one name, also for a font that states none and for one whose name
+// is not a valid PDF name as it stands.
+func TestFontNameAgreesAcrossUsageSubsetAndPDF(t *testing.T) {
+	src, err := os.ReadFile("internal/fonts/liberation/LiberationSans-Regular.ttf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		label string
+		font  []byte
+	}{
+		{"as published", src},
+		{"no PostScript name", dropPSName(t, src)},
+		{"PDF delimiters in the name", setPSName(t, src, "Ab(c)d/e[f] g%h")},
+	} {
+		c, err := New(WithFont("Probe", tc.font))
+		if err != nil {
+			t.Fatal(err)
+		}
+		svg := `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="30"><text x="5" y="20" font-family="Probe" font-size="12px">Hi</text></svg>`
+		pdf, uses, err := c.SVGToPDFUsage(svg, WithPDFText(PDFTextNamed))
+		c.Close()
+		if err != nil {
+			t.Fatalf("%s: %v", tc.label, err)
+		}
+		if len(uses) != 1 {
+			t.Fatalf("%s: %d faces used, want 1", tc.label, len(uses))
+		}
+		u := uses[0]
+		_, name, err := SubsetFont(u.Source, u.GIDs)
+		if err != nil {
+			t.Fatalf("%s: SubsetFont: %v", tc.label, err)
+		}
+		if name != u.PostScriptName {
+			t.Errorf("%s: SubsetFont names the font %q, FontUsage %q", tc.label, name, u.PostScriptName)
+		}
+		doc, err := pdf0.Read(bytes.NewReader(pdf), int64(len(pdf)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		bases := 0
+		for _, o := range doc.Objects {
+			d, ok := o.Value.(*pdf0.Dictionary)
+			if !ok {
+				continue
+			}
+			if b, ok := d.Get("BaseFont").(pdf0.Name); ok {
+				bases++
+				if string(b) != u.PostScriptName {
+					t.Errorf("%s: the PDF refers to the font as /%s, FontUsage reports %q", tc.label, b, u.PostScriptName)
+				}
+			}
+		}
+		if bases == 0 {
+			t.Errorf("%s: no /BaseFont in the PDF", tc.label)
+		}
 	}
 }
