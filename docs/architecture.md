@@ -39,7 +39,7 @@ flowchart LR
 | SVG output | `svg` | vega-scenegraph's `SVGStringRenderer`, byte for byte |
 | text measurement and shaping | `text` (forme) | node-canvas / the browser's canvas |
 | SVG → PNG | `raster`, `pngopt` | resvg (the reference it is tested against) |
-| SVG → PDF | `svgpdf`, with pdf0 writing the fonts; `fontsubset` for `SubsetFont` | none |
+| SVG → PDF | `svgpdf`, with pdf0 writing the fonts | none |
 | JavaScript's numbers, `Math` and sort | `jsval`, `jsmath`, `jssort` | V8, bit for bit (`Math` as arm64 V8 computes it; node on x86-64 differs in the last bit for 0.02–0.75% of arguments of 17 functions, see `jsmath`) |
 | resource budgets, the per-call ledger, byte-bounded caches | `budget`, `bcache` | none (aster's own bounds) |
 | loaders | `loader` | vega-loader's policy |
@@ -98,7 +98,7 @@ Each package imports only packages of lower layers, so there are no cycles and t
 
 <!-- layers:begin (checked by TestPackageLayers) -->
 ```text
-0: bcache budget csscolor fonts/dejavu fonts/liberation fonts/notoemoji fontsubset jsmath jssort textcut
+0: bcache budget csscolor fonts/dejavu fonts/liberation fonts/notoemoji jsmath jssort textcut
 1: imageref jsval loader pngopt text
 2: format geo raster scale/color scene transforms/contour transforms/force transforms/hierarchy transforms/label transforms/voronoi transforms/wordcloud
 3: expr geo/geoscene scale svg svgpdf transforms vega/layout

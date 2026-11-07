@@ -77,7 +77,7 @@ type sfntRecord struct {
 // sfntRecords reads the table directory of face index of b, the one
 // discipline every reader of a whole face here follows, since a font is
 // untrusted (C31): a tag named twice is the table its first record names, as
-// sfntTable and fontsubset take it, and a record whose bytes lie outside the
+// sfntTable takes it, and a record whose bytes lie outside the
 // file is no table. ok is false for a face with no directory, and for one
 // whose tables add up to more than the file: tables lie apart in a sound
 // font, and ones that overlap would make whatever is written from them

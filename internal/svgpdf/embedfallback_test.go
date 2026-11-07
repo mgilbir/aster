@@ -10,11 +10,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mgilbir/forme/font"
 	"github.com/mgilbir/forme/shape"
 	pdf0 "github.com/mgilbir/pdf0"
 
 	"github.com/mgilbir/aster/internal/fonts/liberation"
-	"github.com/mgilbir/aster/internal/fontsubset"
 	"github.com/mgilbir/aster/internal/raster"
 	"github.com/mgilbir/aster/internal/text"
 	"github.com/mgilbir/pdf0/pdfa"
@@ -81,12 +81,8 @@ func TestCIDSetListsTheKeptGlyphs(t *testing.T) {
 	}
 	program := streamData(t, doc, ds[0].Get("FontFile2"))
 	set := streamData(t, doc, ds[0].Get("CIDSet"))
-	sub, err := fontsubset.Parse(program)
-	if err != nil {
-		t.Fatal(err)
-	}
 	held := 0
-	for g := range sub.NumGlyphs() {
+	for g := range sfntGlyphs(program) {
 		// A glyph the program holds has an outline: a loca range of its own.
 		if !glyphHeld(t, program, g) {
 			continue
@@ -104,7 +100,7 @@ func TestCIDSetListsTheKeptGlyphs(t *testing.T) {
 // glyphHeld reports whether glyph g of TrueType program b has outline data.
 func glyphHeld(t *testing.T, b []byte, g int) bool {
 	t.Helper()
-	head, loca := fontsubset.Table(b, "head"), fontsubset.Table(b, "loca")
+	head, loca := font.SFNTTables(b)["head"], font.SFNTTables(b)["loca"]
 	if binary.BigEndian.Uint16(head[50:]) == 1 {
 		return binary.BigEndian.Uint32(loca[4*g+4:]) > binary.BigEndian.Uint32(loca[4*g:])
 	}
@@ -124,7 +120,8 @@ func withOverrun(t *testing.T, r rune) []byte {
 		}
 		gid, _ = f.GlyphID(r)
 	}
-	head, loca, glyf := fontsubset.Table(ttf, "head"), fontsubset.Table(ttf, "loca"), fontsubset.Table(ttf, "glyf")
+	tables := font.SFNTTables(ttf)
+	head, loca, glyf := tables["head"], tables["loca"], tables["glyf"]
 	var start int
 	if binary.BigEndian.Uint16(head[50:]) == 1 {
 		start = int(binary.BigEndian.Uint32(loca[4*gid:]))
@@ -338,7 +335,7 @@ func TestCIDSetOfNameKeyedCFF(t *testing.T) {
 // sfntGlyphs is the glyph count (maxp numGlyphs) of a TrueType program, 0
 // when it has no readable maxp.
 func sfntGlyphs(program []byte) int {
-	maxp := fontsubset.Table(program, "maxp")
+	maxp := font.SFNTTables(program)["maxp"]
 	if len(maxp) < 6 {
 		return 0
 	}
