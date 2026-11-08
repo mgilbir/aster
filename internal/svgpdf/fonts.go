@@ -93,9 +93,40 @@ type pdfFont struct {
 	// written as invisible text in it, by name (see hiddenFor): in
 	// TextEmbed, a font whose program cannot be embedded.
 	outlined bool
-	// checked records, by glyph, whether the subset can keep it
+	// checks records, by glyph, whether the subset can keep it
 	// (fonts.Face.CheckGlyph), as each is first drawn.
-	checked map[int]bool
+	checks glyphChecks
+}
+
+// glyphChecks are the answers CheckGlyph gave, by glyph index: two bits a
+// glyph (asked, keepable), in a set made the first time one is asked, sized
+// to the face's glyphs. A glyph outside them is asked each time.
+type glyphChecks struct {
+	asked, ok []uint64
+}
+
+// get is what was recorded for gid, and whether anything was.
+func (c *glyphChecks) get(gid int) (ok, seen bool) {
+	if gid < 0 || gid/64 >= len(c.asked) || c.asked[gid/64]&(1<<(gid%64)) == 0 {
+		return false, false
+	}
+	return c.ok[gid/64]&(1<<(gid%64)) != 0, true
+}
+
+// set records ok for gid, a glyph of a face of numGlyphs glyphs.
+func (c *glyphChecks) set(gid int, ok bool, numGlyphs int) {
+	if gid < 0 || gid >= numGlyphs {
+		return
+	}
+	if c.asked == nil {
+		words := (numGlyphs + 63) / 64
+		bits := make([]uint64, 2*words) // one allocation for both
+		c.asked, c.ok = bits[:words:words], bits[words:]
+	}
+	c.asked[gid/64] |= 1 << (gid % 64)
+	if ok {
+		c.ok[gid/64] |= 1 << (gid % 64)
+	}
 }
 
 // fontCatalog resolves shaped faces to PDF font resources, caching failures
@@ -209,11 +240,10 @@ func (f *pdfFont) checkGlyph(gid int) (err error) {
 // add registers a font resource of face.
 func (c *fontCatalog) add(face *text.Face, pf *fonts.Face, data []byte) *pdfFont {
 	f := &pdfFont{
-		res:     fmt.Sprintf("F%d", len(c.list)),
-		face:    face,
-		pf:      pf,
-		data:    data,
-		checked: make(map[int]bool),
+		res:  fmt.Sprintf("F%d", len(c.list)),
+		face: face,
+		pf:   pf,
+		data: data,
 	}
 	c.fonts[face] = f
 	c.list = append(c.list, f)
@@ -228,10 +258,10 @@ func (c *fontCatalog) forRun(f *pdfFont, run text.Run) *pdfFont {
 		return f
 	}
 	for _, g := range run.Glyphs {
-		ok, seen := f.checked[g.GID]
+		ok, seen := f.checks.get(g.GID)
 		if !seen {
 			ok = f.checkGlyph(g.GID) == nil
-			f.checked[g.GID] = ok
+			f.checks.set(g.GID, ok, f.pf.NumGlyphs())
 		}
 		if !ok {
 			return c.hiddenFor(run.Face, f)
@@ -251,7 +281,7 @@ func (c *fontCatalog) hiddenFor(face *text.Face, f *pdfFont) *pdfFont {
 	if !ok {
 		pf = f.pf // unreachable: f was adopted from the same face
 	}
-	h := &pdfFont{res: fmt.Sprintf("F%d", len(c.list)), face: face, pf: pf, data: f.data, outlined: true, checked: make(map[int]bool)}
+	h := &pdfFont{res: fmt.Sprintf("F%d", len(c.list)), face: face, pf: pf, data: f.data, outlined: true}
 	c.hidden[face] = h
 	c.list = append(c.list, h)
 	return h
@@ -337,23 +367,32 @@ func SubsetFont(ctx context.Context, m *text.Measurer, source []byte, gids []uin
 }
 
 // allocator numbers the objects pdf0 writes for the fonts in the document's
-// own sequence (fonts.Allocator).
+// own sequence (fonts.Allocator), into the document's objects. The objects
+// are carved out of blocks, a few allocations a document rather than one an
+// object: a font is a dozen of them.
 type allocator struct {
 	objects map[int]*pdf0.IndirectObject
 	next    int
+	block   []pdf0.IndirectObject
 }
 
 func (a *allocator) Add(v pdf0.Object) pdf0.IndirectRef {
+	if len(a.block) == 0 {
+		a.block = make([]pdf0.IndirectObject, 16)
+	}
+	o := &a.block[0]
+	a.block = a.block[1:]
 	n := a.next
 	a.next++
-	a.objects[n] = &pdf0.IndirectObject{Number: n, Value: v}
+	*o = pdf0.IndirectObject{Number: n, Value: v}
+	a.objects[n] = o
 	return pdf0.IndirectRef{Number: n}
 }
 
 // buildFontObjects has pdf0 write every font of the catalog that a run
-// recorded glyphs in, numbering the objects from nextNum: embedded as a
+// recorded glyphs in, into objects, numbering them from nextNum: embedded as a
 // subset (TextEmbed) or by name (TextNamed, and the fonts of runs drawn as
-// outlines over invisible text). It returns the objects, the /Font resource
+// outlines over invisible text). It returns the /Font resource
 // dictionary, the next free object number, and the least PDF version the
 // fonts need. A CFF program is written bare (CIDFontType0C, PDF 1.3), so the
 // fonts need no more than the document's 1.4.
@@ -361,8 +400,8 @@ func (a *allocator) Add(v pdf0.Object) pdf0.IndirectRef {
 // Each subset is bounded: its bytes by twice the font program and 64 KiB,
 // which is charged to the call's ledger while it is made, its work by
 // forme's default, and the call's context stops it.
-func buildFontObjects(catalog *fontCatalog, nextNum int) (map[int]*pdf0.IndirectObject, *pdf0.Dictionary, int, string, error) {
-	alloc := &allocator{objects: make(map[int]*pdf0.IndirectObject), next: nextNum}
+func buildFontObjects(catalog *fontCatalog, objects map[int]*pdf0.IndirectObject, nextNum int) (*pdf0.Dictionary, int, string, error) {
+	alloc := &allocator{objects: objects, next: nextNum}
 	fontRes := &pdf0.Dictionary{}
 	version := "1.1"
 	for _, f := range catalog.list {
@@ -371,14 +410,14 @@ func buildFontObjects(catalog *fontCatalog, nextNum int) (map[int]*pdf0.Indirect
 		}
 		emb, err := catalog.embed(f, alloc)
 		if err != nil {
-			return nil, nil, 0, "", err
+			return nil, 0, "", err
 		}
 		fontRes.Set(pdf0.Name(f.res), emb.Horizontal)
 		if emb.Version > version {
 			version = emb.Version
 		}
 	}
-	return alloc.objects, fontRes, alloc.next, version, nil
+	return fontRes, alloc.next, version, nil
 }
 
 // embed has pdf0 write f's font objects through alloc.

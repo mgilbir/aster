@@ -44,7 +44,13 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 	// Resources: ExtGState entries for the opacity values the content
 	// stream references, in first-use order (deterministic).
 	resources := &pdf0.Dictionary{}
-	fontObjects := map[int]*pdf0.IndirectObject{}
+	// Every object of the document, by number: sized for the skeleton and
+	// what a font writes (a dozen objects), so it seldom grows.
+	nFonts := 0
+	if fonts != nil {
+		nFonts = len(fonts.list)
+	}
+	objects := make(map[int]*pdf0.IndirectObject, 8+12*nFonts)
 	next := 5
 	// blendCS is the colour space transparency groups blend in.
 	blendCS := pdf0.Object(pdf0.Name("DeviceRGB"))
@@ -53,7 +59,7 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 		if err != nil {
 			return nil, err
 		}
-		fontObjects[next] = &pdf0.IndirectObject{Number: next, Value: icc}
+		objects[next] = &pdf0.IndirectObject{Number: next, Value: icc}
 		srgb := pdf0.Array{pdf0.Name("ICCBased"), pdf0.IndirectRef{Number: next}}
 		next++
 		cs := &pdf0.Dictionary{}
@@ -96,14 +102,10 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 	fontsVersion := "1.1"
 	if fonts != nil && len(fonts.list) > 0 {
 		var fontRes *pdf0.Dictionary
-		var built map[int]*pdf0.IndirectObject
 		var err error
-		built, fontRes, next, fontsVersion, err = buildFontObjects(fonts, next)
+		fontRes, next, fontsVersion, err = buildFontObjects(fonts, objects, next)
 		if err != nil {
 			return nil, err
-		}
-		for n, obj := range built {
-			fontObjects[n] = obj
 		}
 		if fontRes.Len() > 0 {
 			resources.Set("Font", fontRes)
@@ -117,7 +119,7 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 		shRes := &pdf0.Dictionary{}
 		shNum := map[*gradient]int{}
 		for _, g := range paints.shadings {
-			fontObjects[next] = &pdf0.IndirectObject{Number: next, Value: g.shading()}
+			objects[next] = &pdf0.IndirectObject{Number: next, Value: g.shading()}
 			shRes.Set(pdf0.Name(g.res), pdf0.IndirectRef{Number: next})
 			shNum[g] = next
 			next++
@@ -132,7 +134,7 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 				pat.Set("Shading", pdf0.IndirectRef{Number: shNum[p.g]})
 				m := p.matrix
 				pat.Set("Matrix", pdf0.Array{pdf0.Real(m.A), pdf0.Real(m.B), pdf0.Real(m.C), pdf0.Real(m.D), pdf0.Real(m.E), pdf0.Real(m.F)})
-				fontObjects[next] = &pdf0.IndirectObject{Number: next, Value: pat}
+				objects[next] = &pdf0.IndirectObject{Number: next, Value: pat}
 				patRes.Set(pdf0.Name(p.res), pdf0.IndirectRef{Number: next})
 				next++
 			}
@@ -146,7 +148,7 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 		var imageObjects map[int]*pdf0.IndirectObject
 		imageObjects, xobjRes = buildImageObjects(images, next)
 		for n, obj := range imageObjects {
-			fontObjects[n] = obj
+			objects[n] = obj
 			next = max(next, n+1)
 		}
 		resources.Set("XObject", xobjRes)
@@ -163,18 +165,18 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 		}
 		resNum := next
 		next++
-		fontObjects[resNum] = &pdf0.IndirectObject{Number: resNum, Value: resources}
+		objects[resNum] = &pdf0.IndirectObject{Number: resNum, Value: resources}
 		pageResources = pdf0.IndirectRef{Number: resNum}
 		formNum := map[string]int{}
 		groupNum := next
 		next++
-		fontObjects[groupNum] = &pdf0.IndirectObject{Number: groupNum, Value: transparencyGroup(blendCS)}
+		objects[groupNum] = &pdf0.IndirectObject{Number: groupNum, Value: transparencyGroup(blendCS)}
 		for _, f := range paints.forms {
 			s, err := f.stream(pdf0.IndirectRef{Number: resNum}, pdf0.IndirectRef{Number: groupNum})
 			if err != nil {
 				return nil, err
 			}
-			fontObjects[next] = &pdf0.IndirectObject{Number: next, Value: s}
+			objects[next] = &pdf0.IndirectObject{Number: next, Value: s}
 			xobjRes.Set(pdf0.Name(f.res), pdf0.IndirectRef{Number: next})
 			formNum[f.res] = next
 			next++
@@ -231,15 +233,10 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 	contents.Dict.Set("Length", pdf0.Integer(compressed.Len()))
 	contents.Dict.Set("Filter", pdf0.Name("FlateDecode"))
 
-	objects := map[int]*pdf0.IndirectObject{
-		1: {Number: 1, Value: catalog},
-		2: {Number: 2, Value: pages},
-		3: {Number: 3, Value: page},
-		4: {Number: 4, Value: contents},
-	}
-	for n, obj := range fontObjects {
-		objects[n] = obj
-	}
+	objects[1] = &pdf0.IndirectObject{Number: 1, Value: catalog}
+	objects[2] = &pdf0.IndirectObject{Number: 2, Value: pages}
+	objects[3] = &pdf0.IndirectObject{Number: 3, Value: page}
+	objects[4] = &pdf0.IndirectObject{Number: 4, Value: contents}
 
 	version := "1.4"
 	if paints.actualText {
