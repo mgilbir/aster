@@ -30,6 +30,7 @@
 package text
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -42,12 +43,13 @@ import (
 	"unicode/utf8"
 	"unsafe"
 
+	"github.com/mgilbir/forme/shape"
+
 	"github.com/mgilbir/aster/internal/bcache"
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/fonts/liberation"
 	"github.com/mgilbir/aster/internal/fonts/notoemoji"
 	"github.com/mgilbir/aster/internal/textcut"
-	"github.com/mgilbir/forme/shape"
 )
 
 // Limits that keep a hostile string or size from making a measurement
@@ -621,7 +623,7 @@ func (m *Measurer) FontData(ctx context.Context, f *Face) ([]byte, error) {
 	if f == nil {
 		return nil, nil
 	}
-	if !f.mapped && f.index == 0 && !(len(f.src) >= 4 && string(f.src[:4]) == "ttcf") && f.Size() <= maxFontBytes {
+	if ownProgram(f) {
 		return f.Program(), nil
 	}
 	// Keyed by what the face is loaded from, not by the Face: a system face
@@ -647,6 +649,42 @@ func (m *Measurer) FontData(ctx context.Context, f *Face) ([]byte, error) {
 		m.programs.Put(key, p, int64(len(p)+len(key)))
 	}
 	return p, nil
+}
+
+// ownProgram reports whether f's program is its own font file (a single font
+// in memory, embedded or given with WithFont), which FontData hands out as it
+// is, rather than one cut out of a collection or a system font.
+func ownProgram(f *Face) bool {
+	return !f.mapped && f.index == 0 && !(len(f.src) >= 4 && string(f.src[:4]) == "ttcf") && f.Size() <= maxFontBytes
+}
+
+// ShapeFaceOf is a clone of the face of m whose font program is data — the
+// Source FontUsage reports for it, the program FontData handed out — and
+// whether m has such a face: a face of its own (its own record of the glyphs
+// used) sharing m's parse, for subsetting the font without reading it again.
+// A face whose program is cut out of a collection or a system font is found
+// while its cut is in m's cache, which a render reporting its usage put there.
+func (m *Measurer) ShapeFaceOf(data []byte) (*shape.Face, bool) {
+	m.mu.RLock()
+	faces := make([]*Face, 0, len(m.entries))
+	for _, e := range m.entries {
+		if e.face != nil {
+			faces = append(faces, e.face)
+		}
+	}
+	m.mu.RUnlock()
+	for _, f := range faces {
+		var p []byte
+		if ownProgram(f) {
+			p = f.Program()
+		} else {
+			p, _ = m.programs.Get(f.sourceKey())
+		}
+		if len(p) == len(data) && len(p) > 0 && bytes.Equal(p, data) {
+			return f.ShapeClone(), true
+		}
+	}
+	return nil, false
 }
 
 // piece is a stretch of text set in one face.

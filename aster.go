@@ -1106,8 +1106,36 @@ func (c *Converter) VegaLiteToPDFUsage(spec []byte, opts ...PDFOption) ([]byte, 
 // Only fonts with TrueType glyph outlines can be subset; others return an
 // error. Glyph IDs outside the font's range are ignored — GIDs sourced from
 // FontUsage are always in range, but hand-built inputs are not validated.
+//
+// It reads source whole, unless it is one of aster's embedded fonts. The
+// Converter that rendered the charts has read every font they use:
+// Converter.SubsetFont subsets from that, in a fraction of the time, and is
+// the one to call when the Converter is at hand.
 func SubsetFont(source []byte, gids []uint16) (subset []byte, postScriptName string, err error) {
-	subset, postScriptName, err = svgpdf.SubsetFont(source, gids)
+	return subsetFontErr(svgpdf.SubsetFont(context.Background(), nil, source, gids))
+}
+
+// SubsetFont is the package-level SubsetFont, for a font program a chart of c
+// used (FontUsage.Source): the same subset and name, made from the font as c
+// has already read it rather than reading it again. A source c has no face of
+// is read as SubsetFont reads it. It is bounded and stopped as a render is:
+// WithTimeout, WithMemoryLimit and Close.
+func (c *Converter) SubsetFont(source []byte, gids []uint16) (subset []byte, postScriptName string, err error) {
+	subset, err = call(c, renderOptions(nil), func(ctx context.Context) ([]byte, error) {
+		m, _, err := c.fontSet()
+		if err != nil {
+			m = nil // read source as SubsetFont does
+		}
+		var sub []byte
+		sub, postScriptName, err = subsetFontErr(svgpdf.SubsetFont(ctx, m, source, gids))
+		return sub, err
+	})
+	return subset, postScriptName, err
+}
+
+// subsetFontErr names what svgpdf.SubsetFont failed at: reading the font (no
+// name yet) or subsetting it.
+func subsetFontErr(subset []byte, postScriptName string, err error) ([]byte, string, error) {
 	switch {
 	case err == nil:
 		return subset, postScriptName, nil

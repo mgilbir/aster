@@ -271,26 +271,38 @@ func (f *pdfFont) postScriptName() string {
 	return f.pf.Name()
 }
 
-// SubsetFont is aster.SubsetFont: forme's subset of source keeping gids (and
-// .notdef and the components of the composites among them), numbered as source
-// numbers its glyphs, which is how pdf0 embeds a TrueType face. name is what
-// pdf0 writes the font by, so it is what FontUsage reports and the /BaseFont of
-// TextNamed output: forme's PostScript name for the face, "Embedded" where the
-// font states none. A glyph index source does not have is ignored.
+// SubsetFont is aster.SubsetFont and Converter.SubsetFont: forme's subset of
+// source keeping gids (and .notdef and the components of the composites among
+// them), numbered as source numbers its glyphs, which is how pdf0 embeds a
+// TrueType face. name is what pdf0 writes the font by, so it is what FontUsage
+// reports and the /BaseFont of TextNamed output: forme's PostScript name for
+// the face, "Embedded" where the font states none. A glyph index source does
+// not have is ignored.
+//
+// The face is not read again where it has been: a face of m (nil for none)
+// whose program source is (Measurer.ShapeFaceOf), else an embedded font
+// (text.EmbeddedShapeFace), is a clone of the parse made once; any other font
+// is read here.
 //
 // Only a face of TrueType outlines is subset: a CFF one, whose program a PDF
 // carries differently, and one of bitmap glyphs only are refused. The subset
 // is bounded as one svgpdf embeds is: its bytes by twice the font program and
-// 64 KiB, its work by forme's default.
-func SubsetFont(source []byte, gids []uint16) (program []byte, name string, err error) {
+// 64 KiB, charged to the ledger of ctx, its work by forme's default, and ctx
+// stops it.
+func SubsetFont(ctx context.Context, m *text.Measurer, source []byte, gids []uint16) (program []byte, name string, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			program, err = nil, fmt.Errorf("svgpdf: internal error subsetting a font: %v", r)
 		}
 	}()
-	// An embedded font (the common case: a chart in Liberation) is a clone of
-	// its parse made once per process; any other is read here.
-	face, ok := text.EmbeddedShapeFace(source)
+	var face *shape.Face
+	ok := false
+	if m != nil {
+		face, ok = m.ShapeFaceOf(source)
+	}
+	if !ok {
+		face, ok = text.EmbeddedShapeFace(source)
+	}
 	if !ok {
 		if face, err = shape.Load(source); err != nil {
 			return nil, "", err
@@ -308,7 +320,13 @@ func SubsetFont(source []byte, gids []uint16) (program []byte, name string, err 
 		use[i] = int(g)
 	}
 	face.Use(use...) // an index the face does not have is not recorded
-	program, _, err = face.SubsetGlyphsContext(context.Background(), shape.SubsetLimits{MaxBytes: 2*len(source) + 64<<10})
+	limits := shape.SubsetLimits{MaxBytes: 2*len(source) + 64<<10}
+	l := budget.LedgerFrom(ctx)
+	if err := l.Alloc(int64(limits.MaxBytes)); err != nil {
+		return nil, name, err
+	}
+	defer l.Free(int64(limits.MaxBytes))
+	program, _, err = face.SubsetGlyphsContext(ctx, limits)
 	if errors.Is(err, shape.ErrSubsetLimit) {
 		err = fmt.Errorf("%w: %w", budget.ErrLimit, err)
 	}

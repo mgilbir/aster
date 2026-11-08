@@ -50,7 +50,7 @@ The tests hold every PDF the option writes, in the tests and under fuzzing, to p
 The payoff of `PDFTextNamed`: render each chart with `VegaLiteToPDFUsage` (or `VegaToPDFUsage`, `SVGToPDFUsage`), which also returns a `[]FontUsage` per chart. Each one has `PostScriptName`, `Source` (the font file's bytes) and `GIDs` (the glyphs used).
 
 1. Union the glyph IDs per font across all charts.
-2. Build one subset per font with `aster.SubsetFont(source, gids)`. It keeps the source's glyph numbering, so the charts' Identity-encoded references resolve against it unchanged, and returns the PostScript name the charts reference.
+2. Build one subset per font with `c.SubsetFont(source, gids)`, on the Converter that rendered the charts, which subsets from the font as it already read it (`aster.SubsetFont` does the same without a Converter, reading the font again unless it is one of aster's own). It keeps the source's glyph numbering, so the charts' Identity-encoded references resolve against it unchanged, and returns the PostScript name the charts reference.
 3. Embed that one subset in the composed document.
 
 Each font's glyphs are then stored once, however many charts use them. `SubsetFont` needs TrueType outlines (CFF fonts return an error) and ignores glyph IDs outside the font.

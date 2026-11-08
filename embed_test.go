@@ -1,6 +1,7 @@
 package aster_test
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"sort"
@@ -299,5 +300,55 @@ func TestSubsetFontCallsAreIndependent(t *testing.T) {
 	}
 	if outline(t, got, a) == "" {
 		t.Error("the second subset lacks the glyph it asked for")
+	}
+}
+
+// TestConverterSubsetFont: Converter.SubsetFont makes, for a font its charts
+// used, the subset and name the package-level SubsetFont makes, from the font
+// as the Converter read it: it does not read the font again, which is most of
+// what SubsetFont costs for a font given with WithFont (DejaVu Sans: 6,253
+// glyphs).
+func TestConverterSubsetFont(t *testing.T) {
+	dv, err := os.ReadFile("internal/fonts/dejavu/DejaVuSans.ttf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := aster.New(aster.WithFont("DV", dv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	svg := `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="60"><text x="5" y="25" font-family="DV" font-size="20">Àéñ 0123</text><text x="5" y="50" font-size="20">Liberation</text></svg>`
+	_, uses, err := c.SVGToPDFUsage(svg, aster.WithPDFText(aster.PDFTextNamed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(uses) != 2 {
+		t.Fatalf("%d faces used, want 2", len(uses))
+	}
+	for _, u := range uses {
+		want, wantName, err := aster.SubsetFont(u.Source, u.GIDs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, name, err := c.SubsetFont(u.Source, u.GIDs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if name != wantName || !bytes.Equal(got, want) {
+			t.Errorf("%s: Converter.SubsetFont made %d bytes named %q, SubsetFont %d bytes named %q", u.PostScriptName, len(got), name, len(want), wantName)
+		}
+		if u.PostScriptName != "DejaVuSans" {
+			continue
+		}
+		cold := testing.AllocsPerRun(5, func() { aster.SubsetFont(u.Source, u.GIDs) })
+		warm := testing.AllocsPerRun(5, func() { c.SubsetFont(u.Source, u.GIDs) })
+		if warm*3 > cold {
+			t.Errorf("Converter.SubsetFont allocates %.0f times, SubsetFont %.0f: it reads the font again", warm, cold)
+		}
+	}
+	c.Close()
+	if _, _, err := c.SubsetFont(uses[0].Source, uses[0].GIDs); err == nil {
+		t.Error("Converter.SubsetFont after Close succeeded")
 	}
 }

@@ -136,4 +136,4 @@ See [errors.md](errors.md).
 
 ## PDF fonts
 
-`FontUsage` (`PostScriptName`, `Source`, `GIDs`) and `SubsetFont(source, gids) (subset, postScriptName, error)`; see [pdf.md](pdf.md#sharing-fonts-across-many-charts).
+`FontUsage` (`PostScriptName`, `Source`, `GIDs`) and `SubsetFont(source, gids) (subset, postScriptName, error)`, also a `Converter` method that reuses the Converter's fonts; see [pdf.md](pdf.md#sharing-fonts-across-many-charts).
