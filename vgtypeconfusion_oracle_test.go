@@ -292,6 +292,12 @@ func TestVegaTypeConfusionMatchesNode(t *testing.T) {
 				}
 				d, limited, sites, all, got := vegaMutantCompare(c, want, m.spec)
 				if d != "" {
+					if fresh, ok := vegaFreshAnswer(o, m.spec, want); ok {
+						want = fresh
+						d, limited, sites, all, got = vegaMutantCompare(c, want, m.spec)
+					}
+				}
+				if d != "" {
 					if class := knownPlatformDifference(o, c, m.spec, want, got, sites, all); class != "" {
 						results <- outcome{m: m, known: class}
 						continue
@@ -418,6 +424,20 @@ func vegaOracleAnswer(o *oracle.Oracle, spec []byte) (want oracle.Result, died s
 	return want, "", err
 }
 
+// vegaFreshAnswer is node's answer to mutant from a fresh process, and whether
+// it is not want, the answer the engine differed from. A pooled process can
+// answer from what earlier renders left in upstream's own caches
+// (oracle.SVGFresh), and the engine, whose renders are independent, is held to
+// a fresh process's answer, as the oracle promises every answer is. Asked only
+// for a difference, since it starts node.
+func vegaFreshAnswer(o *oracle.Oracle, mutant []byte, want oracle.Result) (oracle.Result, bool) {
+	fresh, err := o.SVGFresh(false, mutant)
+	if err != nil || (fresh.SVG == want.SVG && fresh.Err == want.Err) {
+		return want, false
+	}
+	return fresh, true
+}
+
 // vegaMutantPanics renders a mutant node gave no answer to, and describes an
 // engine panic ("" otherwise): without an answer to compare with, a panic is
 // still the engine's failure. Any other outcome of the render (an SVG, an
@@ -491,6 +511,12 @@ func TestVegaTypeConfusionRegressionsMatchNode(t *testing.T) {
 			t.Fatalf("oracle: %v", err)
 		}
 		d, limited := vegaMutantDiffers(c, want, mutant)
+		if d != "" {
+			if fresh, ok := vegaFreshAnswer(o, mutant, want); ok {
+				want = fresh
+				d, limited = vegaMutantDiffers(c, want, mutant)
+			}
+		}
 		if limited {
 			d = "the engine stops at a bound"
 		}

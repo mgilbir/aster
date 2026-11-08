@@ -332,6 +332,37 @@ func (o *Oracle) SVG(lite bool, spec []byte) (Result, error) {
 	return o.ask(map[string]any{"op": "svg", "lite": lite, "spec": string(spec)})
 }
 
+// SVGFresh is SVG answered by a process started for this request alone, which
+// no earlier request left anything in, and it replaces the cached answer.
+//
+// The pool replaces a process once upstream changes a built-in, dies, or keeps
+// a font it refused, but upstream also keeps caches of its own across renders
+// that no answer reports: vega-scenegraph keeps every custom symbol path it
+// parsed in a module-private object, keyed by the shape as a string, so a
+// symbol whose shape is an array holding a path an earlier spec drew is found
+// there and drawn, where a fresh process fails on it (path.match is not a
+// function). A pooled answer can so depend on what the process rendered
+// before. SVGFresh costs a node start; it is for confirming an answer that
+// matters, a difference, not for every request.
+func (o *Oracle) SVGFresh(lite bool, spec []byte) (Result, error) {
+	req := map[string]any{"op": "svg", "lite": lite, "spec": string(spec)}
+	path, err := o.cachePath(req)
+	if err != nil {
+		return Result{}, err
+	}
+	p, err := o.start()
+	if err != nil {
+		return Result{}, err
+	}
+	defer p.stop()
+	res, err := p.ask(req)
+	if err != nil {
+		return res, err
+	}
+	o.store(path, res)
+	return res, nil
+}
+
 // Compile is upstream's Vega-Lite compilation of spec.
 func (o *Oracle) Compile(spec []byte) (Result, error) {
 	return o.ask(map[string]any{"op": "compile", "lite": true, "spec": string(spec)})
@@ -399,6 +430,12 @@ func (o *Oracle) ask(req map[string]any) (Result, error) {
 	if res, err = o.node(req); err != nil {
 		return res, err
 	}
+	o.store(path, res)
+	return res, nil
+}
+
+// store caches res as the answer to the request whose cache path is path.
+func (o *Oracle) store(path string, res Result) {
 	if b, err := json.Marshal(res); err == nil {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err == nil {
 			// Written whole and renamed, so a concurrent reader never sees a
@@ -409,7 +446,6 @@ func (o *Oracle) ask(req map[string]any) (Result, error) {
 			}
 		}
 	}
-	return res, nil
 }
 
 // node answers from one of the pool's processes, starting it if it is not
