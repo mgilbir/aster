@@ -19,18 +19,38 @@ CLI: `aster pdf -i chart.vl.json -o chart.pdf -text embed|named|outlines`.
 
 In `PDFTextEmbed` a CFF (OpenType `OTTO`) font is embedded as a subset of its CFF program (`FontFile3`, `CIDFontType0C`; a CID-keyed one addressed by its CIDs), a TrueType one as a subset of its outlines. Text whose font program cannot be subset (glyph data that is malformed, for one glyph or for the font) is drawn as outlines, and written over them as invisible text in the font by name, so that it is still selected, searched and copied; the rest of the font is embedded. Text in a face no font program can be had of (a system font whose outlines are over 64 MiB) is drawn as outlines, its text written as `ActualText`, which some readers (poppler, PDFium) do not read around paths.
 
-The file says PDF 1.4, or 1.5 when it holds `ActualText` (a glyph that stands for two texts, such as a precomposed and a combining accent, or the case above).
+The file says PDF 1.4, or 1.5 when it holds `ActualText` (a glyph that stands for two texts, such as a precomposed and a combining accent; text drawn as a font's `.notdef`, which no font has a glyph for; or the case above).
 
 **`PDFTextNamed` is not standalone.** Glyphs are addressed by the glyph IDs of the exact font file used when rendering, so whatever assembles the final document must embed that same file. A viewer that substitutes another font may draw the wrong glyphs.
 
 A CFF (OpenType `OTTO`) font is declared a `CIDFontType0`, a TrueType one a `CIDFontType2`; both use `Identity-H`, and the content's codes are always the font's **glyph IDs**. For a CID-keyed CFF font (most CJK OpenType fonts), whose CIDs are not its glyph IDs, the assembler must therefore embed it so that CID = GID: as the glyph-indexed program, not as the CID-keyed original with its own charset.
+
+## Charts for PDF/A documents
+
+`WithPDFAEmbeddable()` (CLI: `-pdfa`) writes a chart that a PDF/A-2 or PDF/A-3 document (ISO 19005-2, -3) can embed, for example with LaTeX's `\includegraphics` under `pdfx`, without breaking a rule of the standard:
+
+```go
+pdf, err := c.VegaLiteToPDF(spec, aster.WithPDFAEmbeddable())  // for a PDF/A-2 or PDF/A-3 document
+```
+
+| PDF/A requires | the chart |
+|---|---|
+| colour that does not depend on the device or on the document's output intent | is sRGB: its resources map `DefaultRGB` onto an embedded sRGB profile, and its transparency groups blend in it |
+| no `/Interpolate true` on images | has none: an image is drawn scaled up with its pixels as blocks in a viewer that honours the mark, rather than smoothed as PNG output is; one scaled down looks the same |
+| embedded fonts, and a complete CIDSet if there is one | embeds its fonts (`PDFTextEmbed`) or draws text as outlines (`PDFTextOutlines`); an embedded TrueType font's CIDSet lists every glyph slot of its program, as veraPDF reads it, and a CFF font that is not CID-keyed, which has no CIDs, carries none; `PDFTextNamed` fails the call |
+| no text showing a font's `.notdef` glyph | draws text no font has a glyph for as outlines, its text kept as `ActualText` |
+| printable annotations | gives its links the print flag |
+
+What is the document's stays the document's: the file identifier, the XMP metadata with the PDF/A identification, and an output intent if it wants one. Transparency is kept, as PDF/A-2 allows; PDF/A-1 forbids it, so the output is not for PDF/A-1 documents.
+
+The tests hold every PDF the option writes, in the tests and under fuzzing, to pdf0's PDF/A-2b, -2u and -3b validator, whose rules are veraPDF's: no rule fails but the document's own two (file identifier, metadata). veraPDF itself, the reference validator, finds every chart of the Vega-Lite examples and the Vega gallery compliant inside a PDF/A-2b and a PDF/A-2u document, and charts with images, links, gradients, blend modes and characters no font has inside a PDF/A-3b one ([testing.md](testing.md)).
 
 ## Sharing fonts across many charts
 
 The payoff of `PDFTextNamed`: render each chart with `VegaLiteToPDFUsage` (or `VegaToPDFUsage`, `SVGToPDFUsage`), which also returns a `[]FontUsage` per chart. Each one has `PostScriptName`, `Source` (the font file's bytes) and `GIDs` (the glyphs used).
 
 1. Union the glyph IDs per font across all charts.
-2. Build one subset per font with `aster.SubsetFont(source, gids)`. It keeps the source's glyph numbering, so the charts' Identity-encoded references resolve against it unchanged, and returns the PostScript name the charts reference.
+2. Build one subset per font with `c.SubsetFont(source, gids)`, on the Converter that rendered the charts, which subsets from the font as it already read it (`aster.SubsetFont` does the same without a Converter, reading the font again unless it is one of aster's own). It keeps the source's glyph numbering, so the charts' Identity-encoded references resolve against it unchanged, and returns the PostScript name the charts reference.
 3. Embed that one subset in the composed document.
 
 Each font's glyphs are then stored once, however many charts use them. `SubsetFont` needs TrueType outlines (CFF fonts return an error) and ignores glyph IDs outside the font.

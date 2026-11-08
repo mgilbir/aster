@@ -171,8 +171,9 @@ func ExampleWithProjection() {
 }
 
 // PDFTextNamed output, assembled into one document, embeds each font once:
-// collect the glyphs every chart uses, then subset each font once.
-func ExampleSubsetFont() {
+// collect the glyphs every chart uses, then subset each font once, with the
+// Converter that rendered them, which has read the fonts already.
+func ExampleConverter_SubsetFont() {
 	c, err := aster.New()
 	if err != nil {
 		log.Fatal(err)
@@ -193,7 +194,7 @@ func ExampleSubsetFont() {
 	}
 	ok := true
 	for name, gids := range glyphs {
-		subset, ps, err := aster.SubsetFont(sources[name], gids)
+		subset, ps, err := c.SubsetFont(sources[name], gids)
 		if err != nil {
 			log.Fatal(err)
 		}

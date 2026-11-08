@@ -616,6 +616,7 @@ func runPDF(args []string) (err error) {
 	input := fs.String("i", "", "input spec file; - for stdin (omitted: stdin, when it is a pipe or a file)")
 	output := fs.String("o", "", "output PDF file (omit for stdout)")
 	textMode := fs.String("text", "embed", "PDF text mode: embed (subset fonts, selectable text), named (no font program; the assembling document must embed the same font), or outlines (glyphs as paths)")
+	pdfa := fs.Bool("pdfa", false, "write the chart for embedding in a PDF/A-2 or PDF/A-3 document (sRGB colour, no /Interpolate, no CIDSet, printable links, no .notdef text); not with -text named")
 	co := registerCommonOpts(fs)
 	signals := registerSignals(fs)
 	pdfOpts := []aster.PDFOption{co.errorHandler()}
@@ -629,6 +630,12 @@ func runPDF(args []string) (err error) {
 			pdfOpts = append(pdfOpts, aster.WithPDFText(aster.PDFTextOutlines))
 		default:
 			return invalid(fs, "invalid -text %q (must be embed, named, or outlines)", *textMode)
+		}
+		if *pdfa {
+			if *textMode == "named" {
+				return invalid(fs, "-pdfa needs the fonts embedded: not with -text named")
+			}
+			pdfOpts = append(pdfOpts, aster.WithPDFAEmbeddable())
 		}
 		return nil
 	})

@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/mgilbir/aster/internal/budget"
-	"github.com/mgilbir/aster/internal/fontsubset"
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/loader"
@@ -359,8 +358,9 @@ func imageOptions(opts []PNGOption) (*pngConfig, error) {
 	return cfg, nil
 }
 
-// pdfOptions are a PDF call's options, checked, and the text mode they select.
-func pdfOptions(opts []PDFOption) (*pdfConfig, svgpdf.TextMode, error) {
+// pdfOptions are a PDF call's options, checked, and what they select of the
+// PDF writer's options (the text mode, PDF/A).
+func pdfOptions(opts []PDFOption) (*pdfConfig, svgpdf.Options, error) {
 	cfg := &pdfConfig{text: PDFTextEmbed}
 	for _, o := range opts {
 		if o != nil {
@@ -376,9 +376,12 @@ func pdfOptions(opts []PDFOption) (*pdfConfig, svgpdf.TextMode, error) {
 	case PDFTextOutlines:
 		mode = svgpdf.TextOutlines
 	default:
-		return nil, 0, fmt.Errorf("aster: unknown PDF text mode %d", cfg.text)
+		return nil, svgpdf.Options{}, fmt.Errorf("aster: unknown PDF text mode %d", cfg.text)
 	}
-	return cfg, mode, nil
+	if cfg.pdfa && mode == svgpdf.TextNamed {
+		return nil, svgpdf.Options{}, errors.New("aster: WithPDFAEmbeddable needs the fonts embedded: PDFTextNamed embeds none (use PDFTextEmbed or PDFTextOutlines)")
+	}
+	return cfg, svgpdf.Options{Text: mode, PDFA: cfg.pdfa}, nil
 }
 
 // VegaToSVG renders a Vega spec (JSON) to an SVG string.
@@ -908,8 +911,8 @@ const (
 )
 
 // PDFOption configures a single PDF render operation: WithPDFText,
-// WithContext, WithErrorHandler, and WithSignal for the Vega and Vega-Lite
-// methods.
+// WithPDFAEmbeddable, WithContext, WithErrorHandler, and WithSignal for the
+// Vega and Vega-Lite methods.
 type PDFOption interface{ applyPDF(*pdfConfig) }
 
 type pdfOption func(*pdfConfig)
@@ -918,6 +921,7 @@ func (f pdfOption) applyPDF(c *pdfConfig) { f(c) }
 
 type pdfConfig struct {
 	text   PDFTextMode
+	pdfa   bool
 	render renderConfig
 }
 
@@ -927,6 +931,25 @@ type pdfConfig struct {
 func WithPDFText(mode PDFTextMode) PDFOption {
 	return pdfOption(func(c *pdfConfig) {
 		c.text = mode
+	})
+}
+
+// WithPDFAEmbeddable writes the chart so that a PDF/A-2 or PDF/A-3
+// document can embed it (as LaTeX's \includegraphics under pdfx does)
+// without breaking a rule of the standard (ISO 19005-2, -3). Its colour is
+// device-independent sRGB, whatever the embedding document's output intent;
+// images are written without /Interpolate, so a viewer draws one scaled up
+// with its pixels as blocks rather than smoothed as PNG output is; embedded
+// fonts carry no CIDSet; links carry the print flag; and text a font cannot
+// draw, which would show its .notdef glyph, is drawn as outlines, its text
+// kept as ActualText. Transparency is kept: PDF/A-2 allows it, PDF/A-1
+// does not, so the output is not for PDF/A-1. The file identifier, XMP
+// metadata, PDF/A identification and output intent are the embedding
+// document's. With PDFTextNamed, whose fonts are not embedded, the call
+// fails before it starts.
+func WithPDFAEmbeddable() PDFOption {
+	return pdfOption(func(c *pdfConfig) {
+		c.pdfa = true
 	})
 }
 
@@ -965,7 +988,7 @@ type pdfOut struct {
 // toPDF is one PDF call: the SVG svg makes (from a specification, or given),
 // converted.
 func (c *Converter) toPDF(opts []PDFOption, usage bool, svg func(ctx context.Context) (string, error)) (pdfOut, error) {
-	cfg, mode, err := pdfOptions(opts)
+	cfg, base, err := pdfOptions(opts)
 	if err != nil {
 		return pdfOut{}, err
 	}
@@ -974,7 +997,7 @@ func (c *Converter) toPDF(opts []PDFOption, usage bool, svg func(ctx context.Con
 		if err != nil {
 			return pdfOut{}, err
 		}
-		pdf, uses, err := c.svgToPDF(ctx, s, mode, usage, true)
+		pdf, uses, err := c.svgToPDF(ctx, s, base, usage, true)
 		return pdfOut{pdf, uses}, err
 	})
 }
@@ -996,12 +1019,12 @@ func (c *Converter) SVGToPDF(svg string, opts ...PDFOption) ([]byte, error) {
 
 // svgPDF is one call converting SVG input to PDF.
 func (c *Converter) svgPDF(svg string, opts []PDFOption, usage bool) (pdfOut, error) {
-	cfg, mode, err := pdfOptions(opts)
+	cfg, base, err := pdfOptions(opts)
 	if err != nil {
 		return pdfOut{}, err
 	}
 	return call(c, svgInput(cfg.render), func(ctx context.Context) (pdfOut, error) {
-		pdf, uses, err := c.svgToPDF(ctx, svg, mode, usage, false)
+		pdf, uses, err := c.svgToPDF(ctx, svg, base, usage, false)
 		return pdfOut{pdf, uses}, err
 	})
 }
@@ -1014,11 +1037,12 @@ func (c *Converter) SVGToPDFUsage(svg string, opts ...PDFOption) ([]byte, []Font
 	return out.pdf, out.uses, err
 }
 
-// svgToPDF converts svg with text mode, reporting its font usage when usage
+// svgToPDF converts svg with the PDF writer's options base selects (text
+// mode, interpolation), reporting its font usage when usage
 // is set: usage copies the font programs it reports. chart is set for the SVG
 // of a chart the caller gave as a specification, which is bounded as the SVG
 // writer bounded it rather than as SVG input (C44).
-func (c *Converter) svgToPDF(ctx context.Context, svg string, mode svgpdf.TextMode, usage, chart bool) (pdf []byte, uses []FontUsage, err error) {
+func (c *Converter) svgToPDF(ctx context.Context, svg string, base svgpdf.Options, usage, chart bool) (pdf []byte, uses []FontUsage, err error) {
 	defer func() {
 		if err != nil {
 			pdf, uses = nil, nil
@@ -1034,7 +1058,8 @@ func (c *Converter) svgToPDF(ctx context.Context, svg string, mode svgpdf.TextMo
 	t0 := time.Now()
 	lim := c.lim.pdfLimits(chart)
 	lim.MaxImagePixels, lim.MaxPixelOps = c.imagePixels(), c.lim.pixelOps
-	popts := svgpdf.Options{Text: mode, Context: ctx, Images: imagesFrom(ctx).load, ImageError: imagesFrom(ctx).imageError(ctx), Limits: lim}
+	popts := base
+	popts.Context, popts.Images, popts.ImageError, popts.Limits = ctx, imagesFrom(ctx).load, imagesFrom(ctx).imageError(ctx), lim
 	if usage {
 		pdf, uses, err = svgpdf.ConvertWithUsage(svg, m, popts)
 	} else {
@@ -1073,27 +1098,50 @@ func (c *Converter) VegaLiteToPDFUsage(spec []byte, opts ...PDFOption) ([]byte, 
 // higher level and shared by every chart that references the same face.
 //
 // It returns the subset program and the source's PostScript name (matching the
-// PostScriptName reported by FontUsage and the /BaseFont PDFTextNamed writes,
-// including the shared fallback for fonts that carry no PostScript name).
+// PostScriptName reported by FontUsage and the /BaseFont PDFTextNamed writes;
+// "Embedded" for a font that carries no PostScript name).
+// The subset is the one PDFTextEmbed embeds, made by forme: the glyphs asked
+// for, .notdef and the components of composite glyphs, with no hinting, no
+// glyph names, and the name table cut to the font's notices and names.
 // Only fonts with TrueType glyph outlines can be subset; others return an
 // error. Glyph IDs outside the font's range are ignored — GIDs sourced from
 // FontUsage are always in range, but hand-built inputs are not validated.
+//
+// It reads source whole, unless it is one of aster's embedded fonts. The
+// Converter that rendered the charts has read every font they use:
+// Converter.SubsetFont subsets from that, in a fraction of the time, and is
+// the one to call when the Converter is at hand.
 func SubsetFont(source []byte, gids []uint16) (subset []byte, postScriptName string, err error) {
-	f, err := fontsubset.Parse(source)
-	if err != nil {
+	return subsetFontErr(svgpdf.SubsetFont(context.Background(), nil, source, gids))
+}
+
+// SubsetFont is the package-level SubsetFont, for a font program a chart of c
+// used (FontUsage.Source): the same subset and name, made from the font as c
+// has already read it rather than reading it again. A source c has no face of
+// is read as SubsetFont reads it. It is bounded and stopped as a render is:
+// WithTimeout, WithMemoryLimit and Close.
+func (c *Converter) SubsetFont(source []byte, gids []uint16) (subset []byte, postScriptName string, err error) {
+	subset, err = call(c, renderOptions(nil), func(ctx context.Context) ([]byte, error) {
+		m, _, err := c.fontSet()
+		if err != nil {
+			m = nil // read source as SubsetFont does
+		}
+		var sub []byte
+		sub, postScriptName, err = subsetFontErr(svgpdf.SubsetFont(ctx, m, source, gids))
+		return sub, err
+	})
+	return subset, postScriptName, err
+}
+
+// subsetFontErr names what svgpdf.SubsetFont failed at: reading the font (no
+// name yet) or subsetting it.
+func subsetFontErr(subset []byte, postScriptName string, err error) ([]byte, string, error) {
+	switch {
+	case err == nil:
+		return subset, postScriptName, nil
+	case postScriptName == "":
 		return nil, "", fmt.Errorf("aster: parse font: %w", err)
+	default:
+		return nil, postScriptName, fmt.Errorf("aster: font %q cannot be subset: %w", postScriptName, err)
 	}
-	name := svgpdf.PostScriptNameOrFallback(f.PostScriptName())
-	if err := f.SubsetErr(); err != nil {
-		return nil, name, fmt.Errorf("aster: font %q cannot be subset: %w", name, err)
-	}
-	set := make(map[uint16]bool, len(gids))
-	for _, g := range gids {
-		set[g] = true
-	}
-	sub, err := f.Subset(set)
-	if err != nil {
-		return nil, name, fmt.Errorf("aster: subset font: %w", err)
-	}
-	return sub, name, nil
 }

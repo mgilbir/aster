@@ -138,6 +138,12 @@ const vega = await import(require.resolve('vega'));
   ASTER_PDFIUM=.pdfium/bin/python go test ./internal/svgpdf -run TestPDFium
   ```
 
+- **PDF/A:** every PDF written `WithPDFAEmbeddable` is held to pdf0's PDF/A-2b validator in the tests and under fuzzing (`FuzzConvert`), and to veraPDF, the reference validator, inside a PDF/A-2b, -2u and -3b document pdf0 builds around it (`TestPDFAEmbeddableVeraPDF`: the feature SVG and a set of charts with `-short`, every chart of both corpora without; the default PDF of the feature SVG must fail, so the check is seen to bite). veraPDF runs in the veraPDF Consortium's Docker image, pinned by digest, without network:
+
+  ```sh
+  ASTER_VERAPDF=$PWD/scripts/verapdf/docker.sh go test -short -run TestPDFAEmbeddableVeraPDF .
+  ```
+
 - **Performance:** `BenchmarkScenes`; `ASTER_PERF=1 go test -run TestPerfReport -v .` (per stage); CI's benchmark gate, see [performance.md](performance.md#regressions). A benchmark times only its loop: `for b.Loop()`, or a `b.N` loop with `b.ResetTimer()` after its setup, which `TestBenchmarksTimeOnlyTheLoop` checks in every test file.
 - **Docs:** `TestLimitsDocMatchesCode` checks [limits.md](limits.md) against the code, and `TestPackageLayers` checks [architecture.md](architecture.md#package-layers). `TestDocsMermaid` renders every Mermaid diagram in the repository's Markdown with Mermaid's own renderer, pinned in `testdata/mermaid` (`(cd testdata/mermaid && npm ci)`). It runs on jsdom rather than a browser, so text sizes are estimated, but parsing, layout and SVG writing all run, and a diagram GitHub would show as an error fails the test. `MERMAID_OUT=dir` keeps the SVGs for a look. `TestDocsLinks` checks that every relative link in the repository's Markdown (inline, reference and HTML) reaches a tracked file, and a heading for a `#fragment`; it and `TestDocsMermaid` read only tracked files, as GitHub does, fences at any indentation included. `TestFixedLimitsDocMatchesCode` checks the fixed bounds of limits.md, number by number, against the constants that enforce them, and `TestDependencyStatement` architecture.md's list of modules against `go list`.
 
@@ -150,6 +156,7 @@ const vega = await import(require.resolve('vega'));
 | `ASTER_ORACLE_ANY_NODE=1` | run the oracle, and record the upstream vectors, under a node other than the pinned one | no: CI installs the pinned node |
 | `ASTER_FUZZ=n` (`ASTER_FUZZ_SEED`, `_START`, `_WORKERS`, `_BUDGET`, `_ORACLE`, `_OUT`) | run and steer the differential fuzzer | no: hours with the oracle, and exploratory; what it finds is fixed and kept under `testdata/corpus/regress`, which CI compares |
 | `ASTER_PDFIUM=path` | the Python with pypdfium2, for `TestPDFium*` | the `pdfium` job |
+| `ASTER_VERAPDF=path` | a veraPDF command line (`scripts/verapdf/docker.sh`), for `TestPDFAEmbeddableVeraPDF`; `require` fails it without one | no: `scripts/check.sh` runs it (Docker) |
 | `ASTER_POPPLER=require` | the tests that read PDFs back with poppler (`pdftotext`, `pdftoppm`) fail instead of skipping without it | the `pdfium` job |
 | `ASTER_PERF=1` | run `TestPerfReport` | no: a timing report for a quiet machine; the benchmark gate guards regressions |
 | `ASTER_SECURITY=1` | run the heavy resource reproducers ([security-review-2026.md](history/security-review-2026.md)) | the `security` job |

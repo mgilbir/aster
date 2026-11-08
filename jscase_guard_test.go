@@ -33,7 +33,7 @@ func TestNoGoCaseOrSpaceInTheEngine(t *testing.T) {
 	// tool, which docs/architecture.md's layer list names (so a new tool
 	// cannot be missed here).
 	notJS := []string{"internal/raster", "internal/svgpdf", "internal/text", "internal/csscolor", "internal/imageref",
-		"internal/loader", "internal/fontsubset", "internal/pngopt", "internal/fonts", "internal/textcut"}
+		"internal/loader", "internal/pngopt", "internal/fonts", "internal/textcut"}
 	notJS = append(notJS, toolPackages(t)...)
 	forbidden := map[string]map[string]bool{
 		"strings": {"ToLower": true, "ToUpper": true, "ToTitle": true, "TrimSpace": true, "Fields": true, "EqualFold": true},

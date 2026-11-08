@@ -189,3 +189,60 @@ func TestHostileFonts(t *testing.T) {
 		}
 	}
 }
+
+// overlappingLoca is Liberation Sans with its loca rewritten so that every
+// odd glyph spans the whole glyf table: what a hostile font does to make each
+// glyph a subset keeps copy all of glyf (C31).
+func overlappingLoca(t *testing.T) []byte {
+	t.Helper()
+	src, err := os.ReadFile("internal/fonts/liberation/LiberationSans-Regular.ttf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := append([]byte(nil), src...)
+	var head, maxp, loca, glyf sfntTable
+	for _, tb := range sfntTables(b) {
+		switch tb.tag {
+		case "head":
+			head = tb
+		case "maxp":
+			maxp = tb
+		case "loca":
+			loca = tb
+		case "glyf":
+			glyf = tb
+		}
+	}
+	long := binary.BigEndian.Uint16(b[head.off+50:]) == 1
+	n := int(binary.BigEndian.Uint16(b[maxp.off+4:]))
+	for g := 0; g <= n; g++ {
+		v := uint32(0)
+		if g%2 == 1 {
+			v = uint32(glyf.length)
+		}
+		if long {
+			binary.BigEndian.PutUint32(b[loca.off+4*g:], v)
+		} else {
+			binary.BigEndian.PutUint16(b[loca.off+2*g:], uint16(v/2))
+		}
+	}
+	return b
+}
+
+// TestSubsetFontOverlappingGlyphs: glyph ranges that overlap must not make a
+// subset larger than the font. SubsetFont refuses such a font, or returns no
+// more than it was given, whichever glyphs it is asked for.
+func TestSubsetFontOverlappingGlyphs(t *testing.T) {
+	font := overlappingLoca(t)
+	var gids []uint16
+	for g := uint16(0); g < 400; g++ {
+		gids = append(gids, g)
+	}
+	out, _, err := SubsetFont(font, gids)
+	if err == nil && len(out) > len(font) {
+		t.Errorf("SubsetFont: %d bytes from a %d-byte font whose glyphs overlap", len(out), len(font))
+	}
+	if err != nil && strings.Contains(err.Error(), "internal") {
+		t.Errorf("SubsetFont: %v", err)
+	}
+}

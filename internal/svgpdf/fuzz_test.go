@@ -9,6 +9,7 @@ import (
 
 	"github.com/mgilbir/aster/internal/fuzzutil"
 	"github.com/mgilbir/aster/internal/text"
+	"github.com/mgilbir/pdf0/pdfa"
 )
 
 // fuzzLimits keep each input's work small, so the fuzzer spends its time on
@@ -30,6 +31,7 @@ func FuzzConvert(f *testing.F) {
 	}
 	for _, s := range fuzzutil.Files(f, "../../testdata/vl-convert/expected/v5_8/*.svg", "../../testdata/security/*.svg", "../../testdata/security/bounded/*.svg") {
 		f.Add(s, uint8(0))
+		f.Add(s, uint8(fuzzPDFA))
 	}
 	for _, s := range []string{
 		`<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><g transform="translate(5,5)" clip-path="url(#c)"><rect width="10" height="5" fill="#f00" fill-opacity="0.5" stroke="rgb(0,0,255)" stroke-width="2" stroke-dasharray="3,1"/>` +
@@ -53,11 +55,19 @@ func FuzzConvert(f *testing.F) {
 			`<image xlink:href="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACwAAAAAAQABAAACAkQBADs=" transform="translate(1,1)" preserveAspectRatio="none" width="3"/><image xlink:href="http://x/y.png"/></svg>`,
 	} {
 		f.Add(s, uint8(0))
+		f.Add(s, uint8(fuzzPDFA))
 	}
 	f.Fuzz(func(t *testing.T, svg string, mode uint8) {
-		opts := Options{Text: TextMode(mode % 3), Limits: fuzzLimits}
+		// The low two bits are the text mode, fuzzPDFA is Options.PDFA.
+		opts := Options{Text: TextMode(mode & 3 % 3), PDFA: mode&fuzzPDFA != 0, Limits: fuzzLimits}
 		fuzzutil.Within(t, 20*time.Second, "Convert", func() {
 			pdf, err := Convert(svg, m, opts)
+			if opts.PDFA && opts.Text == TextNamed {
+				if !errors.Is(err, errPDFANamed) {
+					t.Fatalf("%q: PDFA with TextNamed: %v, want errPDFANamed", svg, err)
+				}
+				return
+			}
 			if err != nil {
 				if !strings.HasPrefix(err.Error(), "svgpdf:") || strings.Contains(err.Error(), "internal error") ||
 					errors.Is(err, context.Canceled) {
@@ -66,6 +76,17 @@ func FuzzConvert(f *testing.F) {
 				return
 			}
 			verifyPDF(t, pdf)
+			if opts.PDFA {
+				// What PDFA promises, for any SVG it converts.
+				for rule, msg := range pdfaRules(t, pdf, pdfa.PDFA2b) {
+					if !embedderRules[rule] {
+						t.Fatalf("%q (text mode %d): PDF/A-2b %s: %s", svg, opts.Text, rule, msg)
+					}
+				}
+			}
 		})
 	})
 }
+
+// fuzzPDFA is the bit of FuzzConvert's mode that sets Options.PDFA.
+const fuzzPDFA = 4

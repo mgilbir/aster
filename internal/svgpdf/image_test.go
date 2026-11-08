@@ -228,3 +228,23 @@ func TestImageRendering(t *testing.T) {
 		t.Error("an image with a style property svgpdf does not draw converted")
 	}
 }
+
+// TestImagePDFANoInterpolate: under PDFA no image carries /Interpolate, and
+// an image drawn both smooth and pixelated is one XObject, still drawn.
+func TestImagePDFANoInterpolate(t *testing.T) {
+	src := dataURL("image/png", pngBytes(t, false))
+	pixelated := ` style="image-rendering: optimizeSpeed; image-rendering: pixelated;"`
+	pdf, err := Convert(imageSVG(imageEl(src, ""), imageEl(src, pixelated)), nil, Options{PDFA: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(pdf, []byte("/Interpolate")) {
+		t.Error("an image is written with /Interpolate under PDFA")
+	}
+	if n := len(pdfImages(t, pdf)); n != 1 {
+		t.Errorf("an image drawn smooth and pixelated is %d images under PDFA, want 1", n)
+	}
+	if n := bytes.Count(pdf, []byte(" Do")); n != 2 {
+		t.Errorf("%d images drawn, want 2", n)
+	}
+}

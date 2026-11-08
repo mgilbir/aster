@@ -46,6 +46,9 @@ type imageCatalog struct {
 	// ctx is the call's (nil: never done), polled as images are decoded,
 	// converted and compressed: each is a loop over up to the pixel limit.
 	ctx context.Context
+	// noInterpolate is set under Options.PDFA: every image is written
+	// unsmoothed, without /Interpolate, which PDF/A forbids.
+	noInterpolate bool
 }
 
 // imageUse is one XObject: an image, smoothed or not.
@@ -138,6 +141,9 @@ func (c *imageCatalog) put(key string, need int64, make func() (*image.NRGBA, er
 // res is the resource name of the image, smoothed or not, naming it on first
 // use.
 func (img *pdfImage) res(smooth bool) string {
+	if img.cat.noInterpolate {
+		smooth = false
+	}
 	name := &img.sharpRes
 	if smooth {
 		name = &img.smoothRes

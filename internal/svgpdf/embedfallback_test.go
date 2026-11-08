@@ -10,13 +10,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mgilbir/forme/font"
 	"github.com/mgilbir/forme/shape"
 	pdf0 "github.com/mgilbir/pdf0"
 
 	"github.com/mgilbir/aster/internal/fonts/liberation"
-	"github.com/mgilbir/aster/internal/fontsubset"
 	"github.com/mgilbir/aster/internal/raster"
 	"github.com/mgilbir/aster/internal/text"
+	"github.com/mgilbir/pdf0/pdfa"
 )
 
 // fontDescriptors are the FontDescriptor dictionaries of a PDF.
@@ -80,12 +81,8 @@ func TestCIDSetListsTheKeptGlyphs(t *testing.T) {
 	}
 	program := streamData(t, doc, ds[0].Get("FontFile2"))
 	set := streamData(t, doc, ds[0].Get("CIDSet"))
-	sub, err := fontsubset.Parse(program)
-	if err != nil {
-		t.Fatal(err)
-	}
 	held := 0
-	for g := range sub.NumGlyphs() {
+	for g := range sfntGlyphs(program) {
 		// A glyph the program holds has an outline: a loca range of its own.
 		if !glyphHeld(t, program, g) {
 			continue
@@ -103,7 +100,7 @@ func TestCIDSetListsTheKeptGlyphs(t *testing.T) {
 // glyphHeld reports whether glyph g of TrueType program b has outline data.
 func glyphHeld(t *testing.T, b []byte, g int) bool {
 	t.Helper()
-	head, loca := fontsubset.Table(b, "head"), fontsubset.Table(b, "loca")
+	head, loca := font.SFNTTables(b)["head"], font.SFNTTables(b)["loca"]
 	if binary.BigEndian.Uint16(head[50:]) == 1 {
 		return binary.BigEndian.Uint32(loca[4*g+4:]) > binary.BigEndian.Uint32(loca[4*g:])
 	}
@@ -123,7 +120,8 @@ func withOverrun(t *testing.T, r rune) []byte {
 		}
 		gid, _ = f.GlyphID(r)
 	}
-	head, loca, glyf := fontsubset.Table(ttf, "head"), fontsubset.Table(ttf, "loca"), fontsubset.Table(ttf, "glyf")
+	tables := font.SFNTTables(ttf)
+	head, loca, glyf := tables["head"], tables["loca"], tables["glyf"]
 	var start int
 	if binary.BigEndian.Uint16(head[50:]) == 1 {
 		start = int(binary.BigEndian.Uint32(loca[4*gid:]))
@@ -259,4 +257,87 @@ func TestCFFTextEmbedded(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestCIDSetIsEveryGlyphSlot: an embedded TrueType subset keeps every glyph
+// slot of its font (emptied where a glyph is not kept), and veraPDF counts a
+// slot as a CID of the program, empty or not (ISO 19005-2, 6.2.11.4.2): the
+// CIDSet lists every slot of the written program and nothing past them, and
+// pdf0's validator, which reads a program as veraPDF does, finds it exact.
+func TestCIDSetIsEveryGlyphSlot(t *testing.T) {
+	svg := `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="40"><text x="5" y="30" font-family="Liberation Sans" font-size="20">Axis 42 àé</text></svg>`
+	pdf, err := Convert(svg, testMeasurer(t), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, ds := fontDescriptors(t, pdf)
+	if len(ds) != 1 {
+		t.Fatalf("%d font descriptors", len(ds))
+	}
+	program := streamData(t, doc, ds[0].Get("FontFile2"))
+	set := streamData(t, doc, ds[0].Get("CIDSet"))
+	n := sfntGlyphs(program)
+	if n < 100 {
+		t.Fatalf("the program has %d glyph slots: not Liberation Sans's", n)
+	}
+	for g := 0; g < 8*len(set); g++ {
+		listed := set[g/8]&(0x80>>(g%8)) != 0
+		if listed != (g < n) {
+			t.Fatalf("glyph slot %d of %d: listed %v", g, n, listed)
+		}
+	}
+	if len(set) != (n+7)/8 {
+		t.Errorf("the CIDSet is %d bytes for %d slots", len(set), n)
+	}
+	for _, level := range []pdfa.Level{pdfa.PDFA1b, pdfa.PDFA2b, pdfa.PDFA2u} {
+		for rule, msg := range pdfaRules(t, pdf, level) {
+			if rule == "6.3.5" || rule == "6.2.11.4.2" {
+				t.Errorf("%v: %s: %s", level, rule, msg)
+			}
+		}
+	}
+}
+
+// TestCIDSetOfNameKeyedCFF: a CFF program that is not CID-keyed has no CIDs
+// as veraPDF reads it (it fails PDF/A-2 on a CIDSet listing the glyphs shown
+// and passes PDF/A-1b, -2b and -2u on one listing CID 0 alone), so its
+// CIDSet lists CID 0 only.
+func TestCIDSetOfNameKeyedCFF(t *testing.T) {
+	otf, err := os.ReadFile("../text/testdata/CFFTest.otf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := text.New(text.WithFont("CFFTest", otf))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pdf, err := Convert(`<svg width="100" height="40"><text transform="translate(5,30)" font-family="CFFTest" font-size="20">01Q</text></svg>`, m, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, ds := fontDescriptors(t, pdf)
+	if len(ds) != 1 || ds[0].Get("FontFile3") == nil {
+		t.Fatalf("%d font descriptors, want one of an embedded CFF program", len(ds))
+	}
+	// pdf0 writes none for such a program outside PDF/A-1: it has no CIDs
+	// to list, and a set of CID 0 alone says nothing more.
+	if set := ds[0].Get("CIDSet"); set != nil {
+		for g, b := range streamData(t, doc, set) {
+			for bit := range 8 {
+				if c := 8*g + bit; c > 0 && b&(0x80>>bit) != 0 {
+					t.Errorf("the CIDSet of a name-keyed CFF lists CID %d", c)
+				}
+			}
+		}
+	}
+}
+
+// sfntGlyphs is the glyph count (maxp numGlyphs) of a TrueType program, 0
+// when it has no readable maxp.
+func sfntGlyphs(program []byte) int {
+	maxp := font.SFNTTables(program)["maxp"]
+	if len(maxp) < 6 {
+		return 0
+	}
+	return int(binary.BigEndian.Uint16(maxp[4:]))
 }

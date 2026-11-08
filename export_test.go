@@ -86,7 +86,7 @@ func (c *Converter) StagesForTest(spec []byte, lite bool) (map[string]time.Durat
 	if _, err := c.svgToPNG(ctx, svg, defaultPNGConfig()); err != nil {
 		return nil, err
 	}
-	if _, _, err := c.svgToPDF(ctx, svg, svgpdf.TextEmbed, false, true); err != nil {
+	if _, _, err := c.svgToPDF(ctx, svg, svgpdf.Options{Text: svgpdf.TextEmbed}, false, true); err != nil {
 		return nil, err
 	}
 	return stages, nil

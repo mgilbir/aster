@@ -114,6 +114,7 @@ Projections that replace d3's clipping stream cannot be described: interrupted a
 | `WithRecodePNG()` | `PNGOption` | off | losslessly re-encode into the cheapest equivalent PNG (indexed or truecolor); same pixels, typically several times smaller |
 | `WithQuantizePNG(maxColors)` | `PNGOption` | off | lossily quantize to at most `maxColors` colours (clamped to 2–256; zero or less fails the call), 8-bit indexed with dithering and a quality guard; falls back to `WithRecodePNG` when the guard trips, and without trying for an image of more than 65,536 distinct colours; wins over `WithRecodePNG` |
 | `WithPDFText(mode PDFTextMode)` | `PDFOption` | `PDFTextEmbed` | `PDFTextEmbed`, `PDFTextNamed`, `PDFTextOutlines`; [pdf.md](pdf.md) |
+| `WithPDFAEmbeddable()` | `PDFOption` | off | write the chart for embedding in a PDF/A-2 or PDF/A-3 document: sRGB colour, no `/Interpolate`, no CIDSet, printable links, no `.notdef` text; fails with `PDFTextNamed`; [pdf.md](pdf.md) |
 
 ## Errors and diagnostics
 
@@ -135,4 +136,4 @@ See [errors.md](errors.md).
 
 ## PDF fonts
 
-`FontUsage` (`PostScriptName`, `Source`, `GIDs`) and `SubsetFont(source, gids) (subset, postScriptName, error)`; see [pdf.md](pdf.md#sharing-fonts-across-many-charts).
+`FontUsage` (`PostScriptName`, `Source`, `GIDs`) and `SubsetFont(source, gids) (subset, postScriptName, error)`, also a `Converter` method that reuses the Converter's fonts; see [pdf.md](pdf.md#sharing-fonts-across-many-charts).

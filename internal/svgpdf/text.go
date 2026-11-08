@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"slices"
 	"strings"
 	"unsafe"
 
 	"github.com/mgilbir/aster/internal/text"
+	"github.com/mgilbir/pdf0/fonts"
 )
 
 // TextShaper shapes text in a font given by its parts into positioned glyph
@@ -273,6 +273,11 @@ func (r *renderer) drawTextLine(str string, st gstate, x, y float64) (float64, e
 		}
 		var err error
 		switch {
+		case r.pdfa && showsNotdef(run):
+			// PDF/A forbids showing .notdef in any rendering mode
+			// (ISO 19005-2, 6.2.11.8): the run is outlines, its text
+			// ActualText.
+			penX, err = r.drawTextRunUnwritten(run, penX, str, fill, !fill)
 		case f != nil && f.outlined:
 			penX, err = r.drawTextRunHidden(f, run, penX, str, st, fill)
 		case !fill:
@@ -364,30 +369,33 @@ func (r *renderer) drawTextRunUnwritten(run text.Run, penX float64, str string, 
 }
 
 // drawTextRunFont emits one shaped run as a PDF text object: a TJ array of
-// glyph IDs with pen adjustments wherever the shaped position differs from
-// the font's natural advance (kerning, mark positioning).
+// the font's codes with pen adjustments wherever the shaped position differs
+// from the font's nominal advance (kerning, mark positioning).
+//
+// pdf0 records the run on the font first (fonts.Face.Record): the glyphs it
+// keeps, the text each stands for, which its ToUnicode map says, and the
+// stretches of the run that need an ActualText because a glyph there stands
+// for other text than the map can say (C58); those are written inside one.
+// The codes are pdf0's (AppendCode) and the advances the font's /W gives
+// (NominalAdvance), so the stream agrees with the font pdf0 writes.
 //
 // The content stream operates under the global y-flip, so the text matrix
 // negates y again (D = -1) to keep glyphs upright; text-space x then
 // coincides with local x, letting shaped advances map 1:1.
 func (r *renderer) drawTextRunFont(f *pdfFont, run text.Run, penX float64, str string) (float64, error) {
 	size := run.Size
-	upem := float64(f.parsed.UnitsPerEm())
 	penXStart := penX
 
-	// The run's text, for extraction: through the font's ToUnicode map, or,
-	// where a glyph of the run already maps to other text there, as the
-	// ActualText of the run (C58).
-	actual := r.mapRun(f, run, str) && run.Start >= 0 && run.Start < run.End && run.End <= len(str)
-	if actual {
-		r.w.beginActualText(str[run.Start:run.End])
+	segs, err := r.recordRun(f, run, str)
+	if err != nil {
+		return penX, err
 	}
 
 	r.w.beginText()
 	r.w.setTextFont(f.res, size)
 	r.w.textMatrix(Matrix{A: 1, B: 0, C: 0, D: -1, E: penXStart, F: 0})
 
-	// The glyph IDs of the run go to one reused buffer; each TJ item is a
+	// The codes of the run go to one reused buffer; each TJ item is a
 	// window onto it, and showGlyphs consumes them before the next run.
 	items := r.tjBuf[:0]
 	r.gidBuf = r.gidBuf[:0]
@@ -408,10 +416,15 @@ func (r *renderer) drawTextRunFont(f *pdfFont, run text.Run, penX float64, str s
 
 	penText := 0.0 // viewer pen position in text space (== local px)
 	rise := 0.0
-	for _, g := range run.Glyphs {
-		gid := uint16(g.GID)
-		f.used[gid] = true
-		code := f.code(gid)
+	seg := 0
+	for i, g := range run.Glyphs {
+		for seg < len(segs) && segs[seg].End <= i {
+			seg++
+		}
+		if seg < len(segs) && segs[seg].Marked && segs[seg].Start == i {
+			show()
+			r.w.beginActualText(segs[seg].ActualText)
+		}
 
 		// Vertical offset (mark positioning): PDF text rise. Shaping y is
 		// up; under the doubly-flipped text matrix a positive rise moves the
@@ -432,9 +445,18 @@ func (r *renderer) drawTextRunFont(f *pdfFont, run text.Run, penX float64, str s
 			penText -= num * size / 1000
 		}
 
+		code, err := f.code(g.GID)
+		if err != nil {
+			return penX, err
+		}
 		r.gidBuf = append(r.gidBuf, code)
-		penText += float64(f.parsed.Advance(gid)) / upem * size
+		penText += f.pf.NominalAdvance(fonts.Glyph{GID: g.GID}) / 1000 * size
 		penX += g.Advance
+
+		if seg < len(segs) && segs[seg].Marked && segs[seg].End == i+1 {
+			show()
+			r.w.endMarkedContent()
+		}
 	}
 	show()
 	r.tjBuf = items[:0]
@@ -442,63 +464,46 @@ func (r *renderer) drawTextRunFont(f *pdfFont, run text.Run, penX float64, str s
 		r.w.textRise(0)
 	}
 	r.w.endText()
-	if actual {
-		r.w.endMarkedContent()
+	// A marked stretch with no glyphs (text a neighbouring run's ligature
+	// drew) is written after the run, empty, so its text is kept.
+	for _, s := range segs {
+		if s.Marked && s.Start == s.End {
+			r.w.beginActualText(s.ActualText)
+			r.w.endMarkedContent()
+		}
 	}
 	return penX, nil
 }
 
-// mapRun records, for the font's ToUnicode map, the text each glyph of the
-// run stands for, and reports whether a glyph of it already stands for other
-// text there, which a ToUnicode map, one text per glyph, cannot say.
-//
-// A cluster's text is the source text from its start to the next cluster's
-// start in logical order (or the run's end); it is mapped by the cluster's
-// first glyph in logical order, and its other glyphs (marks, the parts of a
-// decomposition) stand for nothing. Runs are in visual order: a right-to-left
-// run's clusters descend.
-func (r *renderer) mapRun(f *pdfFont, run text.Run, str string) (conflict bool) {
-	n := len(run.Glyphs)
-	if n == 0 || run.Start < 0 || run.End > len(str) || run.Start >= run.End {
-		return false
+// recordRun records run on f (fonts.Face.RecordAppend) and returns its
+// stretches, valid until the next call.
+// The text a run stands for is its own, str[run.Start:run.End], to which its
+// glyphs' clusters are moved: pdf0 gives the first cluster the text from its
+// start and the last the text to its end.
+func (r *renderer) recordRun(f *pdfFont, run text.Run, str string) (segs []fonts.Segment, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			segs, err = nil, fmt.Errorf("svgpdf: recording a text run: %v", p)
+		}
+	}()
+	src := ""
+	base := 0
+	if run.Start >= 0 && run.Start <= run.End && run.End <= len(str) {
+		src, base = str[run.Start:run.End], run.Start
 	}
-	starts := r.clusterBuf[:0]
+	gs := r.glyphBuf[:0]
 	for _, g := range run.Glyphs {
-		starts = append(starts, g.Cluster)
+		gs = append(gs, fonts.Glyph{GID: g.GID, Cluster: g.Cluster - base})
 	}
-	slices.Sort(starts)
-	starts = slices.Compact(starts)
-	r.clusterBuf = starts
-	endOf := func(c int) int {
-		i, _ := slices.BinarySearch(starts, c+1)
-		if i < len(starts) {
-			return starts[i]
-		}
-		return run.End
+	r.glyphBuf = gs
+	defer f.face.Guard()()
+	// The stretches are read by drawTextRunFont before the next run is
+	// recorded, so one slice serves every run.
+	segs, err = f.pf.RecordAppend(r.recBuf[:0], src, gs)
+	if err == nil {
+		r.recBuf = segs
 	}
-	rtl := n > 1 && run.Glyphs[0].Cluster > run.Glyphs[n-1].Cluster
-	prev := -1
-	for k := range n {
-		i := k
-		if rtl {
-			i = n - 1 - k
-		}
-		g := run.Glyphs[i]
-		want := ""
-		if c := g.Cluster; c != prev {
-			prev = c
-			if e := endOf(c); c >= run.Start && e <= run.End && c < e {
-				want = str[c:e]
-			}
-		}
-		gid := uint16(g.GID)
-		if have, ok := f.toUni[gid]; ok {
-			conflict = conflict || have != want
-			continue
-		}
-		f.toUni[gid] = want
-	}
-	return conflict
+	return segs, err
 }
 
 // drawTextRunOutline emits one shaped run as glyph outlines (the font-free
@@ -612,4 +617,15 @@ func emitGlyphOutline(w *contentWriter, outline []text.Segment, ox, oy float64) 
 		}
 	}
 	return true
+}
+
+// showsNotdef reports whether run shows a font's .notdef glyph (glyph 0),
+// which the shaper gives a character no font of the fallback chain has.
+func showsNotdef(run text.Run) bool {
+	for _, g := range run.Glyphs {
+		if g.GID == 0 {
+			return true
+		}
+	}
+	return false
 }

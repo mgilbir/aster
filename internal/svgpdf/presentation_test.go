@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -352,46 +351,33 @@ func TestToUnicodeClusters(t *testing.T) {
 	}
 }
 
-// TestMapRun pins mapRun's rule on made-up runs: a cluster's text runs to
-// the next cluster in logical order, whatever the visual order, and only
-// its first glyph in logical order maps to it.
-func TestMapRun(t *testing.T) {
-	r := &renderer{}
-	glyphs := func(gc ...int) []text.Glyph {
-		var g []text.Glyph
-		for i := 0; i < len(gc); i += 2 {
-			g = append(g, text.Glyph{GID: gc[i], Cluster: gc[i+1]})
-		}
-		return g
-	}
-	for _, tc := range []struct {
-		name string
-		run  text.Run
-		want map[uint16]string
-	}{
-		{"rtl", text.Run{Glyphs: glyphs(4, 6, 3, 4, 2, 2, 1, 0), Start: 0, End: 8}, map[uint16]string{1: "ab", 2: "cd", 3: "ef", 4: "gh"}},
-		{"marks", text.Run{Glyphs: glyphs(1, 2, 2, 2, 3, 5), Start: 2, End: 6}, map[uint16]string{1: "cde", 2: "", 3: "f"}},
-		{"rtl marks", text.Run{Glyphs: glyphs(3, 3, 2, 0, 1, 0), Start: 0, End: 4}, map[uint16]string{1: "abc", 2: "", 3: "d"}},
-	} {
-		f := &pdfFont{toUni: map[uint16]string{}}
-		if r.mapRun(f, tc.run, "abcdefgh") {
-			t.Errorf("%s: a conflict in a fresh font", tc.name)
-		}
-		if !maps.Equal(f.toUni, tc.want) {
-			t.Errorf("%s: %v, want %v", tc.name, f.toUni, tc.want)
-		}
-		// The same glyphs standing for other text conflict.
-		if !r.mapRun(f, text.Run{Glyphs: glyphs(1, 7), Start: 7, End: 8}, "abcdefgh") {
-			t.Errorf("%s: glyph 1 as \"h\" does not conflict", tc.name)
-		}
-	}
-}
-
 // TestNonScalingStroke: Vega writes vector-effect="non-scaling-stroke" for a
 // path mark with a scale; its stroke is as wide on the page as stated.
 func TestNonScalingStroke(t *testing.T) {
 	content := pageContent(t, page(`<path vector-effect="non-scaling-stroke" transform="translate(10,10) scale(4,1)" d="M0,0L5,5" stroke="red" stroke-width="2"/>`), nil, TextEmbed)
 	if !strings.Contains(content, "2 w") || !strings.Contains(content, "10 40 m") || !strings.Contains(content, "30 35 l") {
 		t.Errorf("the stroke is not drawn in page space:\n%s", content)
+	}
+}
+
+// TestReorderedTextLeftToTheReader: a line with right-to-left text whose
+// clusters each map whole is written without an /ActualText. The ToUnicode
+// map says what each glyph is, and the reader orders the line by its own
+// bidi. A logical-order /ActualText around the reordered stretch, pdf0's
+// default for tagged PDFs, is reversed again by poppler and PDFium alike,
+// and this PDF is untagged (fonts.Face.SetMarkReordered).
+func TestReorderedTextLeftToTheReader(t *testing.T) {
+	m, err := text.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{"ab שלום cd", "שלום עולם"} {
+		pdf, err := Convert(page(`<text transform="translate(5,15)" font-size="10px">`+line+`</text>`), m, Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c := allContent(t, pdf); strings.Contains(c, "/ActualText") {
+			t.Errorf("%q is written with an /ActualText:\n%s", line, c)
+		}
 	}
 }

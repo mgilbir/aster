@@ -1,6 +1,7 @@
 package text
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -287,13 +288,40 @@ var embeddedParses struct {
 // caches. Reading the 13 embedded fonts again for each Measurer cost 3.4 ms
 // and 4 MB.
 func embeddedFace(id, family string, weight int, italic bool, data []byte) (*Face, error) {
+	sf, err := embeddedParse(id, data)
+	if err != nil {
+		return nil, fmt.Errorf("text: loading font %q: %w", family, err)
+	}
+	return faceOf(id, family, weight, italic, sf.Clone(), data, 0, false)
+}
+
+// EmbeddedShapeFace is a clone of forme's parse of the embedded font whose
+// program is data, and whether data is one: a face of its own (its own record
+// of the glyphs used) sharing the parse made once per process.
+func EmbeddedShapeFace(data []byte) (*shape.Face, bool) {
+	for _, e := range embeddedFonts {
+		if len(e.data) != len(data) || !bytes.Equal(e.data, data) {
+			continue
+		}
+		sf, err := embeddedParse(e.id, e.data)
+		if err != nil {
+			return nil, false
+		}
+		return sf.Clone(), true
+	}
+	return nil, false
+}
+
+// embeddedParse is forme's parse of the embedded font id, made once per
+// process.
+func embeddedParse(id string, data []byte) (*shape.Face, error) {
 	embeddedParses.Lock()
 	sf, ok := embeddedParses.m[id]
 	embeddedParses.Unlock()
 	if !ok {
 		parsed, err := shape.Load(data)
 		if err != nil {
-			return nil, fmt.Errorf("text: loading font %q: %w", family, err)
+			return nil, err
 		}
 		embeddedParses.Lock()
 		if embeddedParses.m == nil {
@@ -307,7 +335,7 @@ func embeddedFace(id, family string, weight int, italic bool, data []byte) (*Fac
 		embeddedParses.Unlock()
 		sf = parsed
 	}
-	return faceOf(id, family, weight, italic, sf.Clone(), data, 0, false)
+	return sf, nil
 }
 
 // newFaceAt is newFace for face index of data, which may be a collection,
@@ -479,6 +507,23 @@ func (f *Face) SubsetProgram(gids []int) (program []byte, kept []int, err error)
 	c.Use(gids...)
 	return c.SubsetGlyphs()
 }
+
+// ShapeClone is a clone of the face as loaded, which nothing has shaped
+// through: forme's Clone shares the font's parsing and keeps a record of its
+// own of the glyphs a document uses, which is what a PDF writer embeds from.
+// One document's clone is its own: faces are shared across calls, a record
+// of use is not. Calls into it are guarded as the face's own are (Guard).
+func (f *Face) ShapeClone() *shape.Face {
+	defer f.guard()()
+	return f.shape.Clone()
+}
+
+// Guard is guard for a caller that reads the face through a ShapeClone: a
+// fault reading a mapped font file is a panic for the caller to recover, not
+// the end of the process. Deferred as
+//
+//	defer f.Guard()()
+func (f *Face) Guard() func() { return f.guard() }
 
 // IsCIDKeyed reports whether f's outlines are a CID-keyed CFF font, whose
 // glyphs a PDF addresses by CID (GlyphCode).
