@@ -64,7 +64,8 @@ func (c *rtContext) GeoBounds(projection, geojson, group jsval.Value) jsval.Valu
 		}
 		return boundsValue(p.Path().Bounds(geojson))
 	}
-	b, err := geo.GeoBoundsWith(c.view.ctx, c.view.geoState(), geojson)
+	// The values as d3 returns them: a coordinate as the geometry gives it.
+	b, err := geo.GeoBoundsValuesWith(c.view.ctx, c.view.geoState(), geojson)
 	if err != nil {
 		var th *jsval.Thrown
 		if errors.As(err, &th) {
@@ -72,7 +73,7 @@ func (c *rtContext) GeoBounds(projection, geojson, group jsval.Value) jsval.Valu
 		}
 		panic(&budget.Stop{Err: err}) // a bound: Program.Eval returns it
 	}
-	return boundsValue(b)
+	return jsval.ArrOf(jsval.ArrOf(b[0][0], b[0][1]), jsval.ArrOf(b[1][0], b[1][1]))
 }
 
 func (c *rtContext) GeoCentroid(projection, geojson, group jsval.Value) jsval.Value {

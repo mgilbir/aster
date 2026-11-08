@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/jsval"
 )
 
 // walkBound bounds the walks of one path generator, or of one call of a
@@ -87,6 +88,16 @@ type workCharge struct {
 func (s *workCharge) Point(x, y float64) {
 	s.b.work(1)
 	s.sink.Point(x, y)
+}
+
+// RawPoint is Point for a sink that takes coordinates as given (rawPointer).
+func (s *workCharge) RawPoint(x, y jsval.Value) {
+	s.b.work(1)
+	if r, ok := s.sink.(rawPointer); ok {
+		r.RawPoint(x, y)
+		return
+	}
+	s.sink.Point(coord(x), coord(y))
 }
 func (s *workCharge) LineStart()    { s.sink.LineStart() }
 func (s *workCharge) LineEnd()      { s.sink.LineEnd() }
