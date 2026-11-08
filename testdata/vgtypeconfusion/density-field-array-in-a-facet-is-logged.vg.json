@@ -1,0 +1,6 @@
+{"width":200,"height":100,"data":[{"name":"t","values":[{"c":"a","v":1},{"c":"a","v":2},{"c":"b","v":3},{"c":"b","v":5}]}],
+ "scales":[{"name":"x","type":"linear","domain":[0,6],"range":"width"}],
+ "marks":[{"type":"group","from":{"facet":{"name":"cell","data":"t","groupby":"c"}},
+   "data":[{"name":"density","source":"cell","transform":[{"type":"density","steps":10,"extent":[0,6],"distribution":{"function":"kde","field":[{}]}}]}],
+   "marks":[{"type":"symbol","from":{"data":"density"},"encode":{"enter":{"x":{"scale":"x","field":"value"},"y":{"value":50}}}}]},
+  {"type":"text","encode":{"enter":{"x":{"value":5},"y":{"value":90},"text":{"value":"kept"}}}}]}

@@ -281,6 +281,9 @@ func (c *rtContext) parseParameter(p P, b *paramBuilder) any {
 		}
 		return out
 	case pField:
+		if v.err != "" {
+			fail("%s", v.err)
+		}
 		if v.path == "" {
 			return transforms.Field{}
 		}

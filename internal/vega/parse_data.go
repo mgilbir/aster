@@ -209,7 +209,11 @@ func specFieldRef(v jsval.Value, as string) pField {
 	}
 	segs, err := jsval.SplitAccessPathOf(v, specText(v))
 	if err != nil {
-		perr("%s", err.Error())
+		// The parser only wraps the value ({$field: value}); vega-util's
+		// field splits it when the runtime builds the accessor: as the view
+		// is made, which fails the render, or as a facet's subflow is, during
+		// evaluation, where the dataflow logs the error and goes on.
+		return pField{name: as, err: err.Error()}
 	}
 	if len(segs) == 0 {
 		// a path of no segment, which SplitFieldPath gives back for "."
