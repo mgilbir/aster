@@ -1,0 +1,4 @@
+{"width":200,"height":100,"data":[{"name":"p","values":[{"x":20,"y":20,"t":"one"},{"x":60,"y":50,"t":"two"},{"x":150,"y":80,"t":"three"}]}],
+ "marks":[{"type":"symbol","name":"dots","from":{"data":"p"},"encode":{"enter":{"x":{"field":"x"},"y":{"field":"y"},"size":{"value":40}}}},
+  {"type":"text","from":{"data":"dots"},"encode":{"enter":{"text":{"field":"datum.t"},"fontSize":{"value":10}}},
+   "transform":[{"type":"label","size":{"signal":"[width, height]"},"anchor":["top","bottom","right","left"],"offset":{"signal":"null"}}]}]}
