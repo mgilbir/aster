@@ -141,9 +141,12 @@ func extendWork(sc Scope, dst *Object, sources ...Value) *Object {
 	for _, s := range sources {
 		forIn(sc, s, func(k string, v Value) {
 			if k == "__proto__" {
-				// dst.__proto__ = v (an object, or null): v's members
-				// become readable through dst, and for-in lists them after
-				// dst's own; any other value leaves the prototype as it is
+				// dst.__proto__ = v (an object, an array, or null): v
+				// becomes dst's prototype (jsval.Object.SetPrototype), so
+				// reads find its members after dst's own, an array's
+				// Array.prototype methods among them (encode/defaults.js's
+				// has() finds a "fill" there); any other value leaves the
+				// prototype as it is
 				if v.IsObj() || v.IsArr() || v.IsNull() {
 					proto = v
 				}
@@ -152,11 +155,16 @@ func extendWork(sc Scope, dst *Object, sources ...Value) *Object {
 			set(dst, k, v)
 		})
 	}
+	// for-in lists the prototype's enumerable members after dst's own, and
+	// forIn walks own keys only: they are copied as well.
 	forIn(sc, proto, func(k string, v Value) {
 		if !dst.Has(k) {
 			set(dst, k, v)
 		}
 	})
+	if proto.IsObj() || proto.IsArr() || proto.IsNull() {
+		dst.SetPrototype(proto, nil) // nil: its String is "[object Object]", as before
+	}
 	return dst
 }
 
