@@ -2,7 +2,7 @@
 
 What changed between versions, for users of the library and the CLI. Breaking changes are marked **breaking**.
 
-## Unreleased
+## v0.3.0 (2026-11-09)
 
 ### Added
 
