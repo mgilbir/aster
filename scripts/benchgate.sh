@@ -15,10 +15,18 @@
 # A benchmark regresses when benchstat finds the difference significant
 # (p < 0.05) and the increase is above the threshold for its unit:
 #
-#   allocs/op  > 2%    B/op  > 5%      near-deterministic; a small bar
-#   ns/op      > 15%                   noisy on shared runners: three times the
-#                                      worst spread (5.6%) of medians between
-#                                      a commit and itself on a quiet laptop
+#   allocs/op  > 4%    B/op  > 10%     near-deterministic
+#   ns/op      > 30%                   noisy on shared runners: over five times
+#                                      the worst spread (5.6%) of medians
+#                                      between a commit and itself on a quiet
+#                                      laptop
+#
+# The bars were 2%, 5% and 15% until v0.3.0, whose candidate measured just
+# past them against v0.2.0 (allocs/op +2.06% and +2.86% in svgpdf's Convert,
+# sec/op +15.32% in jsval's ObjectSetSmall) while converting 27-33% faster:
+# a gate that close to a month's ordinary drift failed releases on noise-level
+# trade-offs, so each was doubled. A release still reports every change in
+# its table.
 #
 # The stage times of BenchmarkScenes (json-ns/op, ...) are in the table but
 # not gated: they are too short to be steady, and the packages' own
@@ -107,9 +115,9 @@ mem_cap=${BENCHGATE_MEM_CAP:-1073741824}
 memlimit=${BENCHGATE_MEMLIMIT:-4GiB}
 bytes_floor=${BENCHGATE_BYTES_FLOOR:-64}
 allocs_floor=${BENCHGATE_ALLOCS_FLOOR:-3}
-ns_pct=${BENCHGATE_NS_PCT:-15}
-bytes_pct=${BENCHGATE_BYTES_PCT:-5}
-allocs_pct=${BENCHGATE_ALLOCS_PCT:-2}
+ns_pct=${BENCHGATE_NS_PCT:-30}
+bytes_pct=${BENCHGATE_BYTES_PCT:-10}
+allocs_pct=${BENCHGATE_ALLOCS_PCT:-4}
 benchstat_version=v0.0.0-20260929162123-406019bb8b68
 
 # The benchmarks: a package and a -bench regex per line. Charts of small and
