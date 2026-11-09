@@ -40,6 +40,7 @@ pdf, err := c.VegaLiteToPDF(spec, aster.WithPDFAEmbeddable())  // for a PDF/A-2 
 | embedded fonts, and a complete CIDSet if there is one | embeds its fonts (`PDFTextEmbed`) or draws text as outlines (`PDFTextOutlines`); an embedded TrueType font's CIDSet lists every glyph slot of its program, as veraPDF reads it, and a CFF font that is not CID-keyed, which has no CIDs, carries none; `PDFTextNamed` fails the call |
 | no text showing a font's `.notdef` glyph | draws text no font has a glyph for as outlines, its text kept as `ActualText` |
 | printable annotations | gives its links the print flag |
+| a page from 3 to 14,400 units on each side, and numbers within the limits of ISO 32000-1 Annex C | fails the call for a drawing smaller or larger than that page, or with a number past the largest real; writes a whole number past a 32-bit integer as a real |
 
 What is the document's stays the document's: the file identifier, the XMP metadata with the PDF/A identification, and an output intent if it wants one. Transparency is kept, as PDF/A-2 allows; PDF/A-1 forbids it, so the output is not for PDF/A-1 documents.
 
