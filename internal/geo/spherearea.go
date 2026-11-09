@@ -34,8 +34,8 @@ func newAreaModule() areaModule {
 }
 
 // boundsModule is the bounds module's state kept between calls: the first
-// point of the last ring.
-type boundsModule struct{ lambda00, phi00 float64 }
+// point of the last ring, as given (see boundsState).
+type boundsModule struct{ lambda00, phi00 jsval.Value }
 
 // centroidModule is the centroid module's state kept between calls.
 type centroidModule struct {
@@ -55,7 +55,7 @@ type MeasureState struct {
 
 // NewMeasureState is the state of a fresh process.
 func NewMeasureState() *MeasureState {
-	return &MeasureState{area: newAreaModule(), bnd: boundsModule{nan, nan}, cen: centroidModule{nan, nan, nan, nan, nan}}
+	return &MeasureState{area: newAreaModule(), bnd: boundsModule{jsval.Undefined, jsval.Undefined}, cen: centroidModule{nan, nan, nan, nan, nan}}
 }
 
 func (s *sphereAreaStream) LineStart() {
@@ -138,28 +138,72 @@ func GeoAreaWith(ctx context.Context, ms *MeasureState, object jsval.Value) (flo
 }
 
 // boundsState is d3.geoBounds' stream.
+//
+// d3's bounds hold the coordinates they are given, not their numbers: a
+// longitude or latitude is assigned to the extent and the ranges as it is,
+// compared with JavaScript's < (between two strings, by their characters),
+// and only computed with as a number. A coordinate that is a string of a
+// number ("1e999") so comes back as that string, and an extent of such
+// strings is no infinite one (lambda0 === Infinity is false for "1e999"). So
+// the values are kept here as given (RawPoint), with the arithmetic on their
+// numbers (coord) and the comparisons as JavaScript's (less).
 type boundsState struct {
-	lambda0, phi0, lambda1, phi1 float64
-	lambda2                      float64 // previous lambda
+	lambda0, phi0, lambda1, phi1 jsval.Value
+	lambda2                      jsval.Value // previous lambda
 	*boundsModule
 	p0       vec3
 	has0     bool
 	deltaSum adder
-	ranges   []*[2]float64
-	rng      *[2]float64
+	ranges   []*[2]jsval.Value
+	rng      *[2]jsval.Value
 	err      error // the exception upstream throws at a line without points
 	area     sphereAreaStream
+	w        jsval.Walker // String of an array or object compared
 
 	inPolygon bool
 	inLine    bool // point is linePoint
 }
 
-func (s *boundsState) Sphere() {
-	s.lambda1, s.phi1 = 180, 90
-	s.lambda0, s.phi0 = -180, -90
+// primitive is ToPrimitive(v, number), as < takes it.
+func (s *boundsState) primitive(v jsval.Value) jsval.Value {
+	switch v.Kind() {
+	case jsval.KindTimestamp:
+		return jsval.Num(v.NumValue())
+	case jsval.KindArr, jsval.KindObj, jsval.KindPattern:
+		return jsval.Str(s.w.String(v))
+	}
+	return v
 }
 
-func (s *boundsState) Point(lambda, phi float64) {
+// less is a < b, and whether it is defined (false where NaN is compared).
+func (s *boundsState) less(a, b jsval.Value) (lt, ok bool) {
+	if a.IsNum() && b.IsNum() {
+		x, y := a.NumValue(), b.NumValue()
+		return x < y, !math.IsNaN(x) && !math.IsNaN(y)
+	}
+	c, ok := jsval.RelatePrimitives(s.primitive(a), s.primitive(b))
+	return ok && c < 0, ok
+}
+
+func (s *boundsState) lt(a, b jsval.Value) bool { r, _ := s.less(a, b); return r }
+func (s *boundsState) gt(a, b jsval.Value) bool { r, _ := s.less(b, a); return r }
+func (s *boundsState) le(a, b jsval.Value) bool { r, ok := s.less(b, a); return ok && !r }
+func (s *boundsState) ge(a, b jsval.Value) bool { r, ok := s.less(a, b); return ok && !r }
+
+var (
+	num180, numNeg180 = jsval.Num(180), jsval.Num(-180)
+	num90, numNeg90   = jsval.Num(90), jsval.Num(-90)
+)
+
+func (s *boundsState) Sphere() {
+	s.lambda1, s.phi1 = num180, num90
+	s.lambda0, s.phi0 = numNeg180, numNeg90
+}
+
+func (s *boundsState) Point(lambda, phi float64) { s.RawPoint(jsval.Num(lambda), jsval.Num(phi)) }
+
+// RawPoint is Point with the coordinates as given (rawPointer).
+func (s *boundsState) RawPoint(lambda, phi jsval.Value) {
 	switch {
 	case s.inPolygon:
 		s.ringPoint(lambda, phi)
@@ -167,18 +211,18 @@ func (s *boundsState) Point(lambda, phi float64) {
 		s.linePoint(lambda, phi)
 	default:
 		s.newRange(lambda)
-		if phi < s.phi0 {
+		if s.lt(phi, s.phi0) {
 			s.phi0 = phi
 		}
-		if phi > s.phi1 {
+		if s.gt(phi, s.phi1) {
 			s.phi1 = phi
 		}
 	}
 }
 
-func (s *boundsState) newRange(lambda float64) {
+func (s *boundsState) newRange(lambda jsval.Value) {
 	s.lambda0, s.lambda1 = lambda, lambda
-	s.rng = &[2]float64{lambda, lambda}
+	s.rng = &[2]jsval.Value{lambda, lambda}
 	s.ranges = append(s.ranges, s.rng)
 }
 
@@ -195,8 +239,8 @@ func (s *boundsState) LineEnd() {
 		s.ringPoint(s.lambda00, s.phi00)
 		s.area.LineEnd()
 		if abs(s.deltaSum.value()) > epsilon {
-			s.lambda1 = 180
-			s.lambda0 = -s.lambda1
+			s.lambda1 = num180
+			s.lambda0 = numNeg180
 		}
 		s.setRange()
 		s.has0 = false
@@ -219,12 +263,12 @@ func (s *boundsState) PolygonEnd() {
 	ds := s.deltaSum.value()
 	switch {
 	case s.area.ringSum.value() < 0:
-		s.lambda1, s.phi1 = 180, 90
-		s.lambda0, s.phi0 = -180, -90
+		s.lambda1, s.phi1 = num180, num90
+		s.lambda0, s.phi0 = numNeg180, numNeg90
 	case ds > epsilon:
-		s.phi1 = 90
+		s.phi1 = num90
 	case ds < -epsilon:
-		s.phi0 = -90
+		s.phi0 = numNeg90
 	}
 	s.setRange()
 }
@@ -253,9 +297,12 @@ func angle(lambda0, lambda1 float64) float64 {
 	return lambda1
 }
 
-func (s *boundsState) ringPoint(lambda, phi float64) {
+// angleOf is angle of two longitudes as d3 holds them.
+func angleOf(lambda0, lambda1 jsval.Value) float64 { return angle(coord(lambda0), coord(lambda1)) }
+
+func (s *boundsState) ringPoint(lambda, phi jsval.Value) {
 	if s.has0 {
-		delta := lambda - s.lambda2
+		delta := coord(lambda) - coord(s.lambda2)
 		if abs(delta) > 180 {
 			if delta > 0 {
 				delta += 360
@@ -267,83 +314,85 @@ func (s *boundsState) ringPoint(lambda, phi float64) {
 	} else {
 		s.lambda00, s.phi00 = lambda, phi
 	}
-	s.area.Point(lambda, phi)
+	s.area.Point(coord(lambda), coord(phi))
 	s.linePoint(lambda, phi)
 }
 
-func (s *boundsState) linePoint(lambda, phi float64) {
-	p := cartesian(float64(lambda*radians), float64(phi*radians))
+func (s *boundsState) linePoint(lambda, phi jsval.Value) {
+	lam, ph := coord(lambda), coord(phi)
+	p := cartesian(float64(lam*radians), float64(ph*radians))
 	if s.has0 {
 		normal := cartesianCross(s.p0, p)
 		equatorial := vec3{normal[1], -normal[0], 0}
 		inflection := cartesianCross(equatorial, normal)
 		inflection = cartesianNormalize(inflection)
 		il, ip := spherical(inflection)
-		delta := lambda - s.lambda2
+		lam2 := coord(s.lambda2)
+		delta := lam - lam2
 		sgn := -1.0
 		if delta > 0 {
 			sgn = 1
 		}
 		lambdai := float64(float64(il*degrees) * sgn)
 		antimeridian := abs(delta) > 180
-		if antimeridian != (float64(sgn*s.lambda2) < lambdai && lambdai < float64(sgn*lambda)) {
-			phii := float64(ip * degrees)
-			if phii > s.phi1 {
+		if antimeridian != (float64(sgn*lam2) < lambdai && lambdai < float64(sgn*lam)) {
+			phii := jsval.Num(float64(ip * degrees))
+			if s.gt(phii, s.phi1) {
 				s.phi1 = phii
 			}
-		} else if lambdai = jsMod(lambdai+360, 360) - 180; antimeridian != (float64(sgn*s.lambda2) < lambdai && lambdai < float64(sgn*lambda)) {
-			phii := float64(-ip * degrees)
-			if phii < s.phi0 {
+		} else if lambdai = jsMod(lambdai+360, 360) - 180; antimeridian != (float64(sgn*lam2) < lambdai && lambdai < float64(sgn*lam)) {
+			phii := jsval.Num(float64(-ip * degrees))
+			if s.lt(phii, s.phi0) {
 				s.phi0 = phii
 			}
 		} else {
-			if phi < s.phi0 {
+			if s.lt(phi, s.phi0) {
 				s.phi0 = phi
 			}
-			if phi > s.phi1 {
+			if s.gt(phi, s.phi1) {
 				s.phi1 = phi
 			}
 		}
 		if antimeridian {
-			if lambda < s.lambda2 {
-				if angle(s.lambda0, lambda) > angle(s.lambda0, s.lambda1) {
+			if s.lt(lambda, s.lambda2) {
+				if angleOf(s.lambda0, lambda) > angleOf(s.lambda0, s.lambda1) {
 					s.lambda1 = lambda
 				}
-			} else if angle(lambda, s.lambda1) > angle(s.lambda0, s.lambda1) {
+			} else if angleOf(lambda, s.lambda1) > angleOf(s.lambda0, s.lambda1) {
 				s.lambda0 = lambda
 			}
-		} else if s.lambda1 >= s.lambda0 {
-			if lambda < s.lambda0 {
+		} else if s.ge(s.lambda1, s.lambda0) {
+			if s.lt(lambda, s.lambda0) {
 				s.lambda0 = lambda
 			}
-			if lambda > s.lambda1 {
+			if s.gt(lambda, s.lambda1) {
 				s.lambda1 = lambda
 			}
-		} else if lambda > s.lambda2 {
-			if angle(s.lambda0, lambda) > angle(s.lambda0, s.lambda1) {
+		} else if s.gt(lambda, s.lambda2) {
+			if angleOf(s.lambda0, lambda) > angleOf(s.lambda0, s.lambda1) {
 				s.lambda1 = lambda
 			}
-		} else if angle(lambda, s.lambda1) > angle(s.lambda0, s.lambda1) {
+		} else if angleOf(lambda, s.lambda1) > angleOf(s.lambda0, s.lambda1) {
 			s.lambda0 = lambda
 		}
 	} else {
 		s.newRange(lambda)
 	}
-	if phi < s.phi0 {
+	if s.lt(phi, s.phi0) {
 		s.phi0 = phi
 	}
-	if phi > s.phi1 {
+	if s.gt(phi, s.phi1) {
 		s.phi1 = phi
 	}
 	s.p0, s.has0 = p, true
 	s.lambda2 = lambda
 }
 
-func rangeContains(r *[2]float64, x float64) bool {
-	if r[0] <= r[1] {
-		return r[0] <= x && x <= r[1]
+func (s *boundsState) rangeContains(r *[2]jsval.Value, x jsval.Value) bool {
+	if s.le(r[0], r[1]) {
+		return s.le(r[0], x) && s.le(x, r[1])
 	}
-	return x < r[0] || r[1] < x
+	return s.lt(x, r[0]) || s.lt(r[1], x)
 }
 
 // GeoBounds is d3.geoBounds: the spherical bounding box
@@ -355,31 +404,42 @@ func GeoBounds(ctx context.Context, object jsval.Value) ([2][2]float64, error) {
 	return GeoBoundsWith(ctx, NewMeasureState(), object)
 }
 
-// GeoBoundsWith is GeoBounds over the module state of a render.
+// GeoBoundsWith is GeoBounds over the module state of a render, its values as
+// numbers.
 func GeoBoundsWith(ctx context.Context, ms *MeasureState, object jsval.Value) ([2][2]float64, error) {
-	s := &boundsState{boundsModule: &ms.bnd, lambda0: math.Inf(1), phi0: math.Inf(1), lambda1: math.Inf(-1), phi1: math.Inf(-1)}
+	b, err := GeoBoundsValuesWith(ctx, ms, object)
+	return [2][2]float64{{coord(b[0][0]), coord(b[0][1])}, {coord(b[1][0]), coord(b[1][1])}}, err
+}
+
+// GeoBoundsValuesWith is GeoBoundsWith with each value as d3 returns it: a
+// coordinate as the geometry gives it, which need not be a number
+// (boundsState).
+func GeoBoundsValuesWith(ctx context.Context, ms *MeasureState, object jsval.Value) ([2][2]jsval.Value, error) {
+	nanBox := [2][2]jsval.Value{{jsval.Num(nan), jsval.Num(nan)}, {jsval.Num(nan), jsval.Num(nan)}}
+	inf, negInf := jsval.Num(math.Inf(1)), jsval.Num(math.Inf(-1))
+	s := &boundsState{boundsModule: &ms.bnd, lambda0: inf, phi0: inf, lambda1: negInf, phi1: negInf, w: jsval.WalkerFor(ctx)}
 	s.area.areaModule = &ms.area
 	if err := streamBounded(ctx, object, func(b *walkBound) Stream { return meterInput(s, b) }); err != nil {
-		return [2][2]float64{{nan, nan}, {nan, nan}}, err
+		return nanBox, err
 	}
 	if s.err != nil {
-		return [2][2]float64{{nan, nan}, {nan, nan}}, s.err
+		return nanBox, s.err
 	}
 
 	if n := len(s.ranges); n > 0 {
 		// First, sort ranges by their minimum longitudes.
-		sort.SliceStable(s.ranges, func(i, j int) bool { return s.ranges[i][0]-s.ranges[j][0] < 0 })
+		sort.SliceStable(s.ranges, func(i, j int) bool { return coord(s.ranges[i][0])-coord(s.ranges[j][0]) < 0 })
 
 		// Then, merge any ranges that overlap.
 		a := s.ranges[0]
-		merged := []*[2]float64{a}
+		merged := []*[2]jsval.Value{a}
 		for i := 1; i < n; i++ {
 			b := s.ranges[i]
-			if rangeContains(a, b[0]) || rangeContains(a, b[1]) {
-				if angle(a[0], b[1]) > angle(a[0], a[1]) {
+			if s.rangeContains(a, b[0]) || s.rangeContains(a, b[1]) {
+				if angleOf(a[0], b[1]) > angleOf(a[0], a[1]) {
 					a[1] = b[1]
 				}
-				if angle(b[0], a[1]) > angle(a[0], a[1]) {
+				if angleOf(b[0], a[1]) > angleOf(a[0], a[1]) {
 					a[0] = b[0]
 				}
 			} else {
@@ -395,7 +455,7 @@ func GeoBoundsWith(ctx context.Context, ms *MeasureState, object jsval.Value) ([
 		a = merged[last]
 		for i := 0; i <= last; i++ {
 			b := merged[i]
-			if delta := angle(a[1], b[0]); delta > deltaMax {
+			if delta := angleOf(a[1], b[0]); delta > deltaMax {
 				deltaMax = delta
 				s.lambda0, s.lambda1 = b[0], a[1]
 			}
@@ -403,8 +463,12 @@ func GeoBoundsWith(ctx context.Context, ms *MeasureState, object jsval.Value) ([
 		}
 	}
 
-	if s.lambda0 == math.Inf(1) || s.phi0 == math.Inf(1) {
-		return [2][2]float64{{nan, nan}, {nan, nan}}, nil
+	// lambda0 === Infinity: the number, not a value that reads as it.
+	if isInf(s.lambda0) || isInf(s.phi0) {
+		return nanBox, nil
 	}
-	return [2][2]float64{{s.lambda0, s.phi0}, {s.lambda1, s.phi1}}, nil
+	return [2][2]jsval.Value{{s.lambda0, s.phi0}, {s.lambda1, s.phi1}}, nil
 }
+
+// isInf is v === Infinity.
+func isInf(v jsval.Value) bool { return v.IsNum() && math.IsInf(v.NumValue(), 1) }

@@ -149,11 +149,11 @@ func (e TypeError) Error() string { return e.Msg }
 // Array.prototype's members), as JavaScript reads through its prototype
 // chain, and with a null prototype the object inherits nothing, not even
 // Object.prototype's members (Prop, InheritsObjectPrototype); its own keys
-// (Keys, Has, Len, JSON) are unchanged. Only the Vega-Lite compiler sets
-// one: upstream's code assigns a specification's key "__proto__" in places
-// (vega-lite 5.8's clone, a copy made by assignment), and the assignment
-// replaces the prototype. scope is the compilation's (see
-// ConversionScope). An object with a host payload of its own (a native
+// (Keys, Has, Len, JSON) are unchanged. The Vega-Lite compiler and the Vega
+// parser set one: upstream's code assigns a specification's key "__proto__"
+// in places (vega-lite 5.8's clone, vega-util's extend), and the assignment
+// replaces the prototype. scope is the compilation's (see ConversionScope),
+// nil for none: String of the object is then "[object Object]". An object with a host payload of its own (a native
 // function) takes no prototype. Anything but an object, an array or null
 // gives the object Object.prototype back.
 func (o *Object) SetPrototype(p Value, scope *ConversionScope) {

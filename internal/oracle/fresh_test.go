@@ -52,3 +52,46 @@ func TestAnswerAfterBuiltinChangeIsFresh(t *testing.T) {
 		}
 	}
 }
+
+// SVGFresh is a fresh process's answer where a pooled one depends on what the
+// process rendered before. vega-scenegraph caches custom symbol paths by the
+// shape's string form: a shape that is an array holding a path drawn earlier
+// is found in that cache and drawn, while a fresh process fails on it (the
+// array has no match method). The vgtypeconfusion differential met this
+// on clock.vg.json, nightly seeds 20762 and 20765.
+func TestSVGFreshIgnoresWhatEarlierRendersCached(t *testing.T) {
+	const (
+		path   = "M 0 -5 L 5 5 L -5 5 Z"
+		symbol = `{"width":20,"height":20,"marks":[{"type":"symbol","encode":{"enter":{"x":{"value":10},"y":{"value":10},"shape":{"value":"` + path + `"}}}}]}`
+		array  = `{"width":20,"height":20,"marks":[{"type":"symbol","encode":{"enter":{"x":{"value":10},"y":{"value":10},"shape":{"value":[["` + path + `"]]}}}}]}`
+	)
+	shared := For(t, VL6)
+	o := &Oracle{root: shared.root, set: shared.set, zone: shared.zone, version: shared.version, fingerprint: shared.fingerprint, free: make(chan *proc, 1)}
+	o.free <- nil
+	t.Cleanup(func() {
+		if p := <-o.free; p != nil {
+			p.stop()
+		}
+	})
+	svg := func(spec string) Result {
+		t.Helper()
+		res, err := o.node(map[string]any{"op": "svg", "lite": false, "spec": spec})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	if res := svg(symbol); res.Err != "" {
+		t.Fatalf("upstream refuses the symbol: %s", res.Err)
+	}
+	if res := svg(array); res.Err != "" {
+		t.Skipf("upstream no longer draws an array shape from its cache (%s): the case this guards is gone", res.Err)
+	}
+	fresh, err := o.SVGFresh(false, []byte(array))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Err == "" {
+		t.Errorf("a fresh process draws the array shape too: SVGFresh is not a fresh process's answer, or upstream changed")
+	}
+}

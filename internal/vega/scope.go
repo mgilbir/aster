@@ -30,7 +30,12 @@ type P any
 // $name): the runtime builds one accessor per key and context (inherited
 // by subcontexts), so two fields that print the same, "a" and ["a"], share
 // the first one built.
-type pField struct{ path, name, key string }
+type pField struct {
+	path, name, key string
+	// err is what splitAccessPath throws for the value, which the runtime
+	// throws when it builds the accessor, not the parser (specFieldRef).
+	err string
+}
 
 // pCompare is a comparator reference. Elements are field paths (string) or
 // operators carrying an accessor or an order. key is the runtime's cache key

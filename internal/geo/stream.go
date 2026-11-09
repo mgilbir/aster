@@ -155,10 +155,31 @@ func coord(v jsval.Value) float64 {
 	return jsval.ToNumber(v)
 }
 
+// rawPointer is a Stream that takes a point's coordinates as the geometry
+// gives them, not their numbers: d3.geoBounds keeps them (boundsState).
+type rawPointer interface {
+	RawPoint(x, y jsval.Value)
+}
+
 // streamPoint is `stream.point(c[0], c[1], c[2])`: the coordinates read as
-// members of any value (NaN where they are no numbers), the TypeError of
-// null or undefined.
+// members of any value (NaN where they are no numbers, or as they are, to a
+// rawPointer), the TypeError of null or undefined.
 func streamPoint(c jsval.Value, s Stream) {
+	if r, ok := s.(rawPointer); ok {
+		if items := c.Items(); c.IsArr() {
+			x, y := jsval.Undefined, jsval.Undefined
+			if len(items) >= 1 {
+				x = items[0]
+			}
+			if len(items) >= 2 {
+				y = items[1]
+			}
+			r.RawPoint(x, y)
+			return
+		}
+		r.RawPoint(streamMember(c, "0"), streamMember(c, "1"))
+		return
+	}
 	if items := c.Items(); c.IsArr() {
 		var x, y float64
 		switch {

@@ -57,7 +57,10 @@ func facLabel(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 		if paramTruthy(p.Get("anchor")) { // array(_.anchor || Anchors)
 			opts.Anchor = p.strs("anchor")
 		}
-		if p.has("offset") {
+		if p.has("offset") && !p.Value("offset").IsNull() {
+			// array(_.offset == null ? 1 : _.offset): a null or undefined
+			// offset (a signal's) is the default, as no offset is (has is
+			// false for undefined; Value is undefined for a resolved list).
 			// Math.max(...offset) converts each entry; the slots are
 			// `_[i] || 0`, a Float64Array's number of a truthy entry
 			if l := p.list("offset"); l != nil {

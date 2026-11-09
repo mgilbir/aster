@@ -1,0 +1,2 @@
+{"width":100,"height":60,"scales":[{"name":"c","type":"ordinal","domain":["a","b"],"range":["#f00","#00f"]}],
+ "legends":[{"fill":"c","encode":{"labels":{"update":{"__proto__":[{"value":1}]}}}}]}
