@@ -3,6 +3,7 @@ package svgpdf
 import (
 	"bytes"
 	"fmt"
+	"math"
 
 	pdf0 "github.com/mgilbir/pdf0"
 	"github.com/mgilbir/pdf0/pdfa"
@@ -247,6 +248,17 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 		// as CIDFontType2, they need no more than 1.3.
 		version = fontsVersion
 	}
+	if pdfa {
+		// The drawing's numbers are held to PDF/A's limits as the content
+		// stream is written (contentWriter.realLimit); the objects' are here:
+		// a page, a form's box or a shading's coordinates of a drawing far
+		// off its page.
+		for _, o := range objects {
+			if !withinPDFALimits(o.Value, 0) {
+				return nil, errPastPDFALimit
+			}
+		}
+	}
 	doc := &pdf0.Document{
 		Version: version,
 		Objects: objects,
@@ -277,4 +289,36 @@ func srgbICC() (*pdf0.Stream, error) {
 	s.Dict.Set("Length", pdf0.Integer(len(data)))
 	s.Dict.Set("Filter", pdf0.Name("FlateDecode"))
 	return s, nil
+}
+
+// withinPDFALimits reports whether every number of v is one a PDF/A file may
+// hold (ISO 19005-2 6.1.13, ISO 32000-1 Annex C): an integer in [-2^31,
+// 2^31-1], a real of magnitude at most 3.403e38. A stream's dictionary is
+// checked, not its data. depth bounds the walk (svgpdf builds no deeper
+// objects).
+func withinPDFALimits(v pdf0.Object, depth int) bool {
+	if depth > 32 {
+		return true
+	}
+	switch x := v.(type) {
+	case pdf0.Integer:
+		return x >= -1<<31 && x <= 1<<31-1
+	case pdf0.Real:
+		return math.Abs(float64(x)) <= pdfaRealLimit
+	case pdf0.Array:
+		for _, e := range x {
+			if !withinPDFALimits(e, depth+1) {
+				return false
+			}
+		}
+	case *pdf0.Dictionary:
+		for _, e := range x.All() {
+			if !withinPDFALimits(e, depth+1) {
+				return false
+			}
+		}
+	case *pdf0.Stream:
+		return withinPDFALimits(&x.Dict, depth+1)
+	}
+	return true
 }

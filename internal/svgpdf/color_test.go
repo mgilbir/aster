@@ -115,6 +115,16 @@ func TestFmtNum(t *testing.T) {
 		{1e-9, "0"},  // rounds to zero, not exponent notation
 		{-1e-9, "0"}, // never "-0"
 		{124, "124"},
+		// A PDF integer is limited to [-2^31, 2^31-1] (ISO 32000-1 Annex C,
+		// which PDF/A enforces): a whole number past it is a real.
+		{2147483647, "2147483647"},
+		{-2147483648, "-2147483648"},
+		{2147483648, "2147483648.0"},
+		{-2147483649, "-2147483649.0"},
+		{2147483648.00004, "2147483648.0"}, // whole once rounded
+		{2147483647.5, "2147483647.5"},
+		{3181179205078, "3181179205078.0"}, // FuzzConvert, nightly of 09b579d2
+		{1e14, "100000000000000.0"},        // the slow path
 	}
 	for _, c := range cases {
 		if got := fmtNum(c.in); got != c.want {

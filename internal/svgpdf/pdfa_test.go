@@ -255,3 +255,43 @@ func isSRGB(cs pdf0.Object, icc int) bool {
 	r, ok2 := a[1].(pdf0.IndirectRef)
 	return ok && ok2 && n == "ICCBased" && r.Number == icc
 }
+
+// TestPDFANumbersWithinLimits: a drawing translated far off its page keeps its
+// numbers within what a PDF/A file may hold (ISO 19005-2 6.1.13, ISO 32000-1
+// Annex C): a whole number past a 32-bit integer is written as a real, and a
+// number past the largest real refuses the conversion (errPastPDFALimit),
+// where the plain PDF, which has no such rule, still converts.
+func TestPDFANumbersWithinLimits(t *testing.T) {
+	m, err := text.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := func(tx string) string {
+		return `<svg width="40" height="20"><rect width="9" height="9"/><text transform="translate(` + tx + `,10)" font-size="9px">a</text><path d="M0,0L` + tx + `,1"/></svg>`
+	}
+	for _, mode := range []TextMode{TextEmbed, TextOutlines} {
+		pdf, err := Convert(page("3181179205078"), m, Options{Text: mode, PDFA: true})
+		if err != nil {
+			t.Fatalf("text mode %d: %v", mode, err)
+		}
+		for rule, msg := range pdfaRules(t, pdf, pdfa.PDFA2b) {
+			if rule == "6.1.13" {
+				t.Errorf("text mode %d: PDF/A-2b %s: %s", mode, rule, msg)
+			}
+		}
+		if _, err := Convert(page("1e39"), m, Options{Text: mode, PDFA: true}); !errors.Is(err, errPastPDFALimit) {
+			t.Errorf("text mode %d: a coordinate of 1e39 in PDF/A: %v, want errPastPDFALimit", mode, err)
+		}
+		if _, err := Convert(page("1e39"), m, Options{Text: mode}); err != nil {
+			t.Errorf("text mode %d: a coordinate of 1e39 without PDF/A: %v", mode, err)
+		}
+	}
+	// A number of the objects rather than of the drawing: the page's box.
+	wide := `<svg width="1e39" height="20"><rect width="9" height="9"/></svg>`
+	if _, err := Convert(wide, m, Options{PDFA: true}); !errors.Is(err, errPastPDFALimit) {
+		t.Errorf("a page 1e39 wide in PDF/A: %v, want errPastPDFALimit", err)
+	}
+	if _, err := Convert(wide, m, Options{}); err != nil {
+		t.Errorf("a page 1e39 wide without PDF/A: %v", err)
+	}
+}

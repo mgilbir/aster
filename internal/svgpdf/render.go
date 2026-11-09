@@ -264,6 +264,9 @@ func render(root *element, shaper TextShaper, fetched map[string][]byte, opts Op
 		r.ledger = budget.LedgerFrom(opts.Context)
 	}
 	r.w = newContentWriter(r.ledger)
+	if opts.PDFA {
+		r.w.realLimit = pdfaRealLimit
+	}
 	r.images = newImageCatalog(fetched, r.lim, r.ledger)
 	r.images.onErr = opts.ImageError
 	r.images.noInterpolate = opts.PDFA
