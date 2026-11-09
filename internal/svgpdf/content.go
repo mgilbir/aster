@@ -159,6 +159,15 @@ var errNonFinite = errors.New("svgpdf: a coordinate of the drawing is not a fini
 // 6.1.13), as a coordinate of a drawing translated far off its page can be.
 var errPastPDFALimit = errors.New("svgpdf: a coordinate of the drawing is past the largest number PDF/A allows (3.403e38)")
 
+// errPDFAPageSize fails a PDF/A conversion of a drawing whose page no PDF/A
+// file may have: a side shorter than 3 units or longer than 14,400 (ISO
+// 32000-1 Annex C, ISO 19005-2 6.1.13), as an SVG 1 px or 200 inches wide
+// is.
+var errPDFAPageSize = errors.New("svgpdf: the drawing's page is outside the sizes PDF/A allows (each side from 3 to 14,400 units)")
+
+// pdfaPageSide reports whether a page side of n units is one PDF/A allows.
+func pdfaPageSide(n float64) bool { return n >= 3 && n <= 14400 }
+
 // pdfaRealLimit is the largest magnitude of a real in a PDF/A-2 or -3 file.
 const pdfaRealLimit = 3.403e38
 

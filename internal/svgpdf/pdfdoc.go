@@ -258,6 +258,11 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 				return nil, errPastPDFALimit
 			}
 		}
+		// A page's side is from 3 to 14,400 units (ISO 32000-1 Annex C,
+		// which ISO 19005-2 6.1.13 holds a PDF/A page to).
+		if !pdfaPageSide(width) || !pdfaPageSide(height) {
+			return nil, errPDFAPageSize
+		}
 	}
 	doc := &pdf0.Document{
 		Version: version,

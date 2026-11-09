@@ -295,3 +295,37 @@ func TestPDFANumbersWithinLimits(t *testing.T) {
 		t.Errorf("a page 1e39 wide without PDF/A: %v", err)
 	}
 }
+
+// TestPDFAPageSize: a PDF/A page's side is from 3 to 14,400 units (ISO 32000-1
+// Annex C, ISO 19005-2 6.1.13), so a drawing outside that fails the PDF/A
+// conversion (errPDFAPageSize), found by FuzzConvert with a 1×1 SVG; the plain
+// PDF, which has no such rule, still converts, and a drawing at the limits
+// converts to a page PDF/A-2b accepts.
+func TestPDFAPageSize(t *testing.T) {
+	m, err := text.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := func(w, h string) string {
+		return `<svg width="` + w + `" height="` + h + `"><rect width="1" height="1"/></svg>`
+	}
+	for _, c := range []struct{ w, h string }{{"1", "1"}, {"2.9", "20"}, {"20", "2.9"}, {"14400.5", "20"}, {"20", "15000"}} {
+		if _, err := Convert(page(c.w, c.h), m, Options{PDFA: true}); !errors.Is(err, errPDFAPageSize) {
+			t.Errorf("a %s×%s page in PDF/A: %v, want errPDFAPageSize", c.w, c.h, err)
+		}
+		if _, err := Convert(page(c.w, c.h), m, Options{}); err != nil {
+			t.Errorf("a %s×%s page without PDF/A: %v", c.w, c.h, err)
+		}
+	}
+	for _, c := range []struct{ w, h string }{{"3", "3"}, {"14400", "14400"}} {
+		pdf, err := Convert(page(c.w, c.h), m, Options{PDFA: true})
+		if err != nil {
+			t.Fatalf("a %s×%s page in PDF/A: %v", c.w, c.h, err)
+		}
+		for rule, msg := range pdfaRules(t, pdf, pdfa.PDFA2b) {
+			if rule == "6.1.13" {
+				t.Errorf("a %s×%s page: PDF/A-2b %s: %s", c.w, c.h, rule, msg)
+			}
+		}
+	}
+}
