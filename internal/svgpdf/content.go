@@ -23,6 +23,9 @@ type contentWriter struct {
 	buf    []byte
 	chunks [][]byte // full chunks before buf; see spill
 	err    error    // the first number refused (see num)
+	// realLimit is the largest magnitude a number may have, 0 for none:
+	// PDF/A's (Options.PDFA), the float32 range of ISO 32000-1 Annex C.
+	realLimit float64
 	// ledger is the call's, charged for the chunks of the stream and the
 	// resources it registers before they are made (nil: unbounded).
 	ledger *budget.Ledger
@@ -151,13 +154,27 @@ func (w *contentWriter) markBox(x0, y0, x1, y1 float64) {
 // finite: one that overflowed in the arithmetic of transforms and paths.
 var errNonFinite = errors.New("svgpdf: a coordinate of the drawing is not a finite number")
 
-// num appends v to dst as appendNum does, if it is finite; otherwise it
-// records errNonFinite and appends 0.
+// errPastPDFALimit fails a PDF/A conversion with a number no PDF/A file may
+// hold: past the float32 range ISO 32000-1 Annex C gives a real (ISO 19005-2
+// 6.1.13), as a coordinate of a drawing translated far off its page can be.
+var errPastPDFALimit = errors.New("svgpdf: a coordinate of the drawing is past the largest number PDF/A allows (3.403e38)")
+
+// pdfaRealLimit is the largest magnitude of a real in a PDF/A-2 or -3 file.
+const pdfaRealLimit = 3.403e38
+
+// num appends v to dst as appendNum does, if it is finite (and within
+// realLimit); otherwise it records the error and appends 0.
 func (w *contentWriter) num(dst []byte, v float64) []byte {
-	if v-v == 0 { // finite: v-v is NaN for NaN and both infinities
-		return appendNum(dst, v)
+	if v-v != 0 { // not finite: v-v is NaN for NaN and both infinities
+		return w.nonFinite(dst)
 	}
-	return w.nonFinite(dst)
+	if w.realLimit > 0 && math.Abs(v) > w.realLimit {
+		if w.err == nil {
+			w.err = errPastPDFALimit
+		}
+		return append(dst, '0')
+	}
+	return appendNum(dst, v)
 }
 
 // nonFinite records errNonFinite and appends 0 in place of the number.
@@ -173,7 +190,10 @@ func (w *contentWriter) nonFinite(dst []byte) []byte {
 const gsEntryBytes = 256
 
 // fmtNum formats a coordinate for a content stream: fixed notation (PDF has
-// no exponent syntax), at most 4 decimals, trailing zeros trimmed.
+// no exponent syntax), at most 4 decimals, trailing zeros trimmed. A whole
+// number past a 32-bit integer is written as a real ("3181179205078.0"): an
+// integer is limited to [-2^31, 2^31-1] (ISO 32000-1 Annex C), which PDF/A
+// enforces (ISO 19005-2 6.1.13), and a real is not.
 func fmtNum(v float64) string {
 	var a [32]byte
 	return string(appendNum(a[:0], v))
@@ -195,6 +215,9 @@ func appendNum(dst []byte, v float64) []byte {
 		dst = append(dst, '-')
 	}
 	dst = strconv.AppendUint(dst, q/10000, 10)
+	if q%10000 == 0 && pastInt32(q/10000, neg) {
+		return append(dst, ".0"...)
+	}
 	if f := q % 10000; f != 0 {
 		d := [5]byte{'.', byte('0' + f/1000), byte('0' + f/100%10), byte('0' + f/10%10), byte('0' + f%10)}
 		n := 5
@@ -204,6 +227,15 @@ func appendNum(dst []byte, v float64) []byte {
 		dst = append(dst, d[:n]...)
 	}
 	return dst
+}
+
+// pastInt32 reports whether the whole number of magnitude n, negative when
+// neg, is outside a PDF integer's [-2^31, 2^31-1].
+func pastInt32(n uint64, neg bool) bool {
+	if neg {
+		return n > 1<<31
+	}
+	return n > 1<<31-1
 }
 
 // scaleFixed4 returns |v| * 10^4 rounded to the nearest integer, ties to
@@ -263,6 +295,11 @@ func appendNumSlow(dst []byte, v float64) []byte {
 	}
 	if string(dst[start:]) == "-0" {
 		dst = append(dst[:start], '0')
+	}
+	if bytes.IndexByte(dst[start:], '.') < 0 && math.Abs(v) >= 1<<31 {
+		// A whole number this large is written as a real (see fmtNum); the
+		// slow path takes magnitudes of 1e14 and up, all of them past it.
+		dst = append(dst, ".0"...)
 	}
 	return dst
 }
