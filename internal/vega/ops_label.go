@@ -1,6 +1,7 @@
 package vega
 
 import (
+	"fmt"
 	"maps"
 	"math"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/mgilbir/aster/internal/raster"
 	"github.com/mgilbir/aster/internal/scene"
 	"github.com/mgilbir/aster/internal/svg"
+	"github.com/mgilbir/aster/internal/transforms"
 	"github.com/mgilbir/aster/internal/transforms/label"
 )
 
@@ -85,19 +87,7 @@ func facLabel(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 		// `_.avoidBaseMark !== false`
 		av := p.Value("avoidBaseMark")
 		opts.NoAvoidBaseMark = av.IsBool() && !av.IsTruthy()
-		avoidUndefined := false
-		for _, m := range p.list("avoidMarks") {
-			if m == nil {
-				avoidUndefined = true // the mark's items: undefined, a mark that never ran
-			}
-			if items, _ := m.([]*scene.Item); len(items) > 0 {
-				ai := make([]any, len(items))
-				for i, it := range items {
-					ai[i] = it
-				}
-				opts.AvoidMarks = append(opts.AvoidMarks, ai)
-			}
-		}
+		opts.AvoidMarks, opts.AvoidMarksLength, opts.AvoidMarksErr = labelAvoidMarks(p.Get("avoidMarks"), v.jsString)
 
 		labels := make([]label.Label, len(pulse.items))
 		for i, t := range pulse.items {
@@ -115,11 +105,6 @@ func facLabel(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 				l.Text = t.Walker().String(t.Text())
 			}
 			l.Base = labelBase(v, t, opts.MarkIndex)
-		}
-		if avoidUndefined && len(labels) > 0 && !naiveGroupArea(labels[0].Base, opts.MarkIndex, opts.Method) {
-			// markBitmaps: avoidMarks.forEach(items => draw(context, items)),
-			// and draw reads items.length first.
-			fail("TypeError: Cannot read properties of undefined (reading 'length')")
 		}
 		if cmp != nil {
 			views := make(map[*scene.Item]jsval.Value, len(pulse.items))
@@ -168,6 +153,100 @@ func facLabel(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 		}
 		return reflowPulse(pulse)
 	}), nil
+}
+
+// labelAvoidMarks reads the avoidMarks parameter as the layout does:
+// `_.avoidMarks || []`, which takes the layout to markBitmaps when its length
+// is truthy, where `avoidMarks.forEach(items => draw(context, items))` draws
+// each mark's items, and draw reads `items.length`, then
+// `items[0].mark.marktype` (str is String()). It returns the items of the
+// marks to avoid that have any, whether that length is truthy, and what
+// markBitmaps throws for a value that is no list of marks (a signal's: a
+// number, a string, an object, or a list holding null or text). The layout
+// throws it only when it draws the marks to avoid (not for the naive
+// placement of a group of areas, nor for no labels).
+func labelAvoidMarks(x any, str func(jsval.Value) string) (marks [][]any, length bool, err error) {
+	if list, ok := x.([]any); ok { // the items of the marks named
+		for _, m := range list {
+			switch m := m.(type) {
+			case nil: // the items of a mark that never ran: undefined
+				if err == nil {
+					err = labelDrawErr(jsval.Undefined, str)
+				}
+			case []*scene.Item:
+				if len(m) > 0 {
+					ai := make([]any, len(m))
+					for i, it := range m {
+						ai[i] = it
+					}
+					marks = append(marks, ai)
+				}
+			case jsval.Value:
+				if err == nil {
+					err = labelDrawErr(m, str)
+				}
+			}
+		}
+		return marks, len(list) > 0, err
+	}
+	v, _ := native(x).(jsval.Value)
+	if !v.IsTruthy() {
+		return nil, false, nil
+	}
+	length = jsval.Member(v, "length").IsTruthy()
+	if !v.IsArr() {
+		if !jsval.IsFunction(jsval.Member(v, "forEach")) {
+			err = &jsval.Thrown{Name: "TypeError", Msg: "avoidMarks.forEach is not a function"}
+		}
+		return nil, length, err
+	}
+	for _, e := range v.Items() {
+		if err = labelDrawErr(e, str); err != nil {
+			break
+		}
+	}
+	return nil, length, err
+}
+
+// labelDrawErr is what vega-label's draw(context, items) throws for items
+// that are a value of the specification rather than a mark's items: nothing
+// when items.length is falsy (draw returns); a TypeError reading a member of
+// null or undefined, or calling `Marks[type].draw` for a marktype that names
+// no mark (an Object.prototype member's name included: no draw either). Values
+// shaped as items of a mark upstream draws (`{mark: {marktype: "rect"}}`, or
+// "group", whose items it walks) the engine does not draw: ErrNotModelled.
+func labelDrawErr(items jsval.Value, str func(jsval.Value) string) error {
+	if items.IsNullish() {
+		return labelReadErr(items, "length")
+	}
+	if !jsval.Member(items, "length").IsTruthy() {
+		return nil
+	}
+	first := jsval.Member(items, "0")
+	if first.IsNullish() {
+		return labelReadErr(first, "mark")
+	}
+	mark := jsval.Member(first, "mark")
+	if mark.IsNullish() {
+		return labelReadErr(mark, "marktype")
+	}
+	if t := str(jsval.Member(mark, "marktype")); !labelMarkTypes[t] {
+		if _, ok := jsval.Inherited(t); ok || t == "__proto__" {
+			return &jsval.Thrown{Name: "TypeError", Msg: "Marks[type].draw is not a function"}
+		}
+		return &jsval.Thrown{Name: "TypeError", Msg: "Cannot read properties of undefined (reading 'draw')"}
+	}
+	return fmt.Errorf("label: avoidMarks given values shaped as scene items: %w", transforms.ErrNotModelled)
+}
+
+// labelMarkTypes are the own keys of vega-scenegraph's Marks.
+var labelMarkTypes = map[string]bool{
+	"arc": true, "area": true, "group": true, "image": true, "line": true, "path": true,
+	"rect": true, "rule": true, "shape": true, "symbol": true, "text": true, "trail": true,
+}
+
+func labelReadErr(v jsval.Value, key string) error {
+	return &jsval.Thrown{Name: "TypeError", Msg: "Cannot read properties of " + nullishName(v) + " (reading '" + key + "')"}
 }
 
 // labelCoord is a position as the layout reads it: the number it converts to,
@@ -508,13 +587,4 @@ func strictTypeName(m *scene.Mark) string {
 		return "\x00" + m.Type.String()
 	}
 	return m.Type.String()
-}
-
-// naiveGroupArea is labelLayout's isNaiveGroupArea: labels of a group of
-// areas placed by the naive method, which does not draw the marks to avoid.
-func naiveGroupArea(b *label.Base, markIndex int, method string) bool {
-	if b == nil || b.MarkType != "group" || markIndex < 0 || markIndex >= len(b.Marks) {
-		return false
-	}
-	return b.Marks[markIndex].MarkType == "area" && (method == "" || method == "naive")
 }

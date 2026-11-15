@@ -95,6 +95,17 @@ func extendEncode(m *budget.Meter, encode, extra jsval.Value, skip map[string]bo
 		if skip != nil && skip[name] {
 			return
 		}
+		if name == "__proto__" {
+			// encode.__proto__ is Object.prototype: extend writes the block's
+			// members there, onto every object of the process, which is not
+			// modelled (node's runtime then fails where a for-in lists them:
+			// `spec.data[name].forEach` over an operator's data roles, for a
+			// member that is no array); a block with none changes nothing
+			if _, ok := firstForInKey(set); ok {
+				perr("an encode block named __proto__ writes to Object.prototype, which is not modelled")
+			}
+			return
+		}
 		cur := eo.Lookup(name)
 		var dst *jsval.Object
 		switch {

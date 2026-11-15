@@ -1,0 +1,1 @@
+{"width":100,"height":60,"padding":4,"encode":{"__proto__":{}},"data":[{"name":"pts","values":[{"x":1,"y":2}]}],"marks":[{"type":"symbol","from":{"data":"pts"},"encode":{"enter":{"x":{"field":"x","mult":10},"y":{"field":"y","mult":10}}}}]}
