@@ -136,7 +136,15 @@ type Options struct {
 	LineAnchor       string // "start" or "end" (default)
 	MarkIndex        int
 	AvoidMarks       [][]any // item handles of extra marks to avoid
-	NoAvoidBaseMark  bool    // upstream avoidBaseMark=false
+	// AvoidMarksLength is upstream's `avoidMarks.length` truthy: it takes the
+	// layout to markBitmaps without a base mark, whether or not a mark it
+	// names has items (AvoidMarks holds only those that have).
+	AvoidMarksLength bool
+	// AvoidMarksErr, when set, is what markBitmaps throws drawing the marks
+	// to avoid (`avoidMarks.forEach(items => draw(context, items))` given a
+	// value that is no list of marks), after the canvases are made.
+	AvoidMarksErr   error
+	NoAvoidBaseMark bool // upstream avoidBaseMark=false
 	// PlacedText, when set, is called for a label placed at a coordinate that
 	// is text (see Texts), with that text (nil for a number).
 	PlacedText func(l *Label, x, y *string)
@@ -292,7 +300,7 @@ func Layout(ctx context.Context, labels []Label, o Options) ([]Placement, error)
 			labelInside = anchors[i] == 0x5 || offsets[i] < 0
 		}
 		hasBase := (marktype != "" && avoidBaseMark) || isGroupArea
-		if len(o.AvoidMarks) > 0 || hasBase {
+		if len(o.AvoidMarks) > 0 || o.AvoidMarksLength || hasBase {
 			var baseItems []any
 			if hasBase {
 				baseItems = make([]any, len(labels))
@@ -302,7 +310,7 @@ func Layout(ctx context.Context, labels []Label, o Options) ([]Placement, error)
 					}
 				}
 			}
-			bms, err = markBitmaps(ctx, sc, o.Rasterizer, baseItems, o.AvoidMarks, labelInside, isGroupArea)
+			bms, err = markBitmaps(ctx, sc, o.Rasterizer, baseItems, o.AvoidMarks, o.AvoidMarksErr, labelInside, isGroupArea)
 			if err != nil {
 				return nil, err
 			}

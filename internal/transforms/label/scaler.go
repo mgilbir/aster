@@ -91,7 +91,7 @@ func toInt32(f float64) int { return int(jsmath.ToInt32(f)) }
 // markBitmaps rasterizes the base and avoided marks and folds them into the
 // interior layer (marks to keep clear of) and, when labels may sit inside
 // their mark or on an area, the border layer.
-func markBitmaps(ctx context.Context, sc *scaler, r Rasterizer, baseMark []any, avoidMarks [][]any, labelInside, isGroupArea bool) ([2]*bitmap, error) {
+func markBitmaps(ctx context.Context, sc *scaler, r Rasterizer, baseMark []any, avoidMarks [][]any, avoidErr error, labelInside, isGroupArea bool) ([2]*bitmap, error) {
 	// canvas(width, height) is node-canvas's: a side past 32767 (a negative
 	// one is read as unsigned) is refused by the constructor, and getImageData
 	// refuses a side that truncates to less than one pixel (NaN, infinity,
@@ -100,6 +100,11 @@ func markBitmaps(ctx context.Context, sc *scaler, r Rasterizer, baseMark []any, 
 		if v := [2]float64{sc.width, sc.height}[i]; v < 0 || v > 32767 {
 			return [2]*bitmap{}, &jsval.Thrown{Name: "Error", Msg: "Canvas " + name + " cannot exceed 32767"}
 		}
+	}
+	// The canvases are made; drawing the marks to avoid comes before
+	// getImageData, so what it throws comes before getImageData's refusals.
+	if avoidErr != nil {
+		return [2]*bitmap{}, avoidErr
 	}
 	for i, name := range [2]string{"width", "height"} {
 		if v := [2]float64{sc.width, sc.height}[i]; !(v >= 1) || math.IsInf(v, 0) {
