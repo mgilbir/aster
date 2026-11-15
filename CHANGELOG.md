@@ -2,6 +2,14 @@
 
 What changed between versions, for users of the library and the CLI. Breaking changes are marked **breaking**.
 
+## Unreleased
+
+### Fidelity
+
+- A label transform given an `avoidMarks` that is no list of marks (a signal's number, text or object) fails where upstream's `avoidMarks.forEach` does, once the layout draws the marks to avoid, and so does a signal's list holding null, undefined or text, which upstream's `draw` reads as a mark's items: the error ends that dataflow run, as upstream logs it, so the chart renders without the labels placed. The engine placed the labels as if nothing were to be avoided (`{"signal": "1/0"}` in the labeled scatter plot: a chart of 899×648 where node draws 810×610). Found by the nightly Vega type-confusion differential (seed 20768).
+- A label transform whose `avoidMarks` names only marks without items avoids nothing, as upstream does (`avoidMarks.length` takes its layout to the mark bitmaps, where nothing is drawn); the engine avoided the label's data points, as when no mark is named.
+- The root group's encode holding a block named `"__proto__"` fails the render: vega-util's `extend` writes that block's members onto `Object.prototype`, which is not modelled ([ADR 0013](docs/adr/0013-invalid-input-fails-where-upstream-throws.md)), and node then fails where vega-runtime lists them among an operator's data roles. A guide's encode already failed so; an empty block still changes nothing. Found by the nightly Vega type-confusion differential (seeds 20771, 20772).
+
 ## v0.3.0 (2026-11-09)
 
 ### Added
