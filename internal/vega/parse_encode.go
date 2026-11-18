@@ -163,16 +163,16 @@ func (c *encCompiler) compile(enc jsval.Value) valueFn {
 	// its source, which parses whatever its length (the parser's length
 	// bound is for programs): a path mark's path data given inline can be
 	// longer, and is charged where it is parsed into a path.
-	if !enc.IsArr() && len(src) > expr.MaxLength && canonicalEntry(enc, 0) && enc.IsObj() {
+	if !enc.IsArr() && len(src) > expr.MaxLength && c.canonicalEntry(enc, 0) && enc.IsObj() {
 		if v := enc.Get("value"); v.IsStr() && src == specStringValue(v).String() {
 			return c.entry(enc)
 		}
 	}
 	f := c.scope.parseExpression(src)
-	if enc.IsArr() && canonicalRules(rules) {
+	if enc.IsArr() && c.canonicalRules(rules) {
 		return c.rule(rules)
 	}
-	if !enc.IsArr() && canonicalEntry(enc, 0) {
+	if !enc.IsArr() && c.canonicalEntry(enc, 0) {
 		return c.entry(enc)
 	}
 	c.depExpr(f)
@@ -190,7 +190,7 @@ func (c *encCompiler) compile(enc jsval.Value) valueFn {
 // as offset, mult or exponent a reference of these kinds. It is nearly every
 // reference of a chart.
 func (c *encCompiler) literalReference(enc jsval.Value) bool {
-	return c.literalAt(enc, 0) && canonicalEntry(enc, 0)
+	return c.literalAt(enc, 0) && c.canonicalEntry(enc, 0)
 }
 
 func (c *encCompiler) literalAt(enc jsval.Value, depth int) bool {
@@ -328,17 +328,19 @@ func (c *encCompiler) rule(items []jsval.Value) valueFn {
 // canonicalRules reports whether rule.js's source for rules evaluates as
 // rule() does: every rule a canonical entry tested by an expression string,
 // and only the last untested (rule.js concatenates every rule's source, so
-// what follows an untested rule is appended to its value).
-func canonicalRules(rules []jsval.Value) bool {
+// what follows an untested rule is appended to its value). A test is
+// spliced into the source as `(test)?`, so it must compile on its own, as
+// canonicalEntry requires of a signal.
+func (c *encCompiler) canonicalRules(rules []jsval.Value) bool {
 	if len(rules) == 0 {
 		return false
 	}
 	for i, r := range rules {
-		if !canonicalEntry(r, 0) {
+		if !c.canonicalEntry(r, 0) {
 			return false
 		}
 		switch t := r.Get("test"); {
-		case t.IsStr() && t.StrValue() != "":
+		case t.IsStr() && t.StrValue() != "" && c.parses(t.StrValue()):
 		case !t.IsTruthy() && i == len(rules)-1:
 		default:
 			return false
@@ -350,8 +352,13 @@ func canonicalRules(rules []jsval.Value) bool {
 // canonicalEntry reports whether enc is a value reference whose members
 // have the types upstream documents, which entry() compiles to closures that
 // evaluate as entry.js's source does. depth bounds the nesting of the
-// references a property holds.
-func canonicalEntry(enc jsval.Value, depth int) bool {
+// references a property holds. A signal is spliced into that source as
+// text, `(signal)` (`datum[signal]` for a field's), and entry() parses it
+// alone: the two read the same only when the signal compiles on its own. A
+// signal that does not ("1) + (2") closes the parentheses it is spliced
+// into and is part of a larger expression, which only the source reads as
+// upstream does.
+func (c *encCompiler) canonicalEntry(enc jsval.Value, depth int) bool {
 	if !enc.IsObj() || depth > 8 {
 		return false
 	}
@@ -360,11 +367,11 @@ func canonicalEntry(enc jsval.Value, depth int) bool {
 	}
 	switch {
 	case enc.Get("signal").IsTruthy():
-		if !enc.Get("signal").IsStr() {
+		if !enc.Get("signal").IsStr() || !c.parses(enc.Get("signal").StrValue()) {
 			return false
 		}
 	case !enc.Get("field").IsNullish():
-		if !canonicalField(enc.Get("field")) {
+		if !c.canonicalFieldAt(enc.Get("field"), 0) {
 			return false
 		}
 	case !enc.Get("value").IsUndefined():
@@ -377,14 +384,14 @@ func canonicalEntry(enc jsval.Value, depth int) bool {
 	if s := enc.Get("scale"); !s.IsNullish() {
 		// A scale reference is a name, a signal, or a field reference whose
 		// value names the scale (entry.js's scaleRef: `field(scale)`).
-		if !(s.IsStr() || s.IsObj() && s.Get("signal").IsStr() && s.Get("signal").IsTruthy() ||
-			s.IsObj() && !s.Get("signal").IsTruthy() && canonicalFieldAt(s, depth+1)) {
+		if !(s.IsStr() || s.IsObj() && s.Get("signal").IsStr() && s.Get("signal").IsTruthy() && c.parses(s.Get("signal").StrValue()) ||
+			s.IsObj() && !s.Get("signal").IsTruthy() && c.canonicalFieldAt(s, depth+1)) {
 			return false
 		}
 		if r := enc.Get("range"); !r.IsNullish() && !r.IsNum() {
 			return false
 		}
-		if b := enc.Get("band"); b.IsTruthy() && !b.IsNum() && !b.IsBool() && !canonicalEntry(b, depth+1) {
+		if b := enc.Get("band"); b.IsTruthy() && !b.IsNum() && !b.IsBool() && !c.canonicalEntry(b, depth+1) {
 			return false
 		}
 	}
@@ -393,7 +400,7 @@ func canonicalEntry(enc jsval.Value, depth int) bool {
 		switch {
 		case p.IsNullish(), p.IsNum(), p.IsBool():
 		case p.IsObj():
-			if !canonicalEntry(p, depth+1) {
+			if !c.canonicalEntry(p, depth+1) {
 				return false
 			}
 		default:
@@ -403,23 +410,22 @@ func canonicalEntry(enc jsval.Value, depth int) bool {
 	return true
 }
 
-// canonicalField reports whether a field reference is a path, or a signal,
-// datum, group or parent reference to a path or to a canonical reference
-// (field.js's resolveField of a nested one, `object[inner]`), which fieldObj
-// compiles as entry.js's source reads it.
-func canonicalField(f jsval.Value) bool { return canonicalFieldAt(f, 0) }
-
-func canonicalFieldAt(f jsval.Value, depth int) bool {
+// canonicalFieldAt reports whether a field reference is a path, or a signal
+// that compiles on its own (see canonicalEntry), or a datum, group or parent
+// reference to a path or to a canonical reference (field.js's resolveField
+// of a nested one, `object[inner]`), which fieldObj compiles as entry.js's
+// source reads it.
+func (c *encCompiler) canonicalFieldAt(f jsval.Value, depth int) bool {
 	if f.IsStr() {
 		return f.StrValue() != ""
 	}
 	if !f.IsObj() || depth > 8 {
 		return false
 	}
-	key := func(k jsval.Value) bool { return k.IsStr() || k.IsObj() && canonicalFieldAt(k, depth+1) }
+	key := func(k jsval.Value) bool { return k.IsStr() || k.IsObj() && c.canonicalFieldAt(k, depth+1) }
 	switch {
 	case f.Get("signal").IsTruthy():
-		return f.Get("signal").IsStr()
+		return f.Get("signal").IsStr() && c.parses(f.Get("signal").StrValue())
 	case f.Get("group").IsTruthy() || f.Get("parent").IsTruthy():
 		k := f.Get("parent")
 		if !k.IsTruthy() {

@@ -145,6 +145,17 @@ func paramAt(x any, i int) any {
 	return nil
 }
 
+// paramIndexer is paramAt(x, i) for a loop over i: a string's code units
+// are decoded once, not at each read (paramAt decodes the whole string to
+// read one unit, which made a loop over a long string quadratic).
+func paramIndexer(x any) func(i int) any {
+	if v, ok := native(x).(jsval.Value); ok && v.IsStr() {
+		a, _ := jsval.ToArrayLike(v)
+		return func(i int) any { return a.At(int64(i)) }
+	}
+	return func(i int) any { return paramAt(x, i) }
+}
+
 // paramValueOf is a parameter element as a value: nil is undefined, a null
 // accessor null, and an operator value that is no JSON value (a function)
 // reads as an object that names nothing.
@@ -240,9 +251,10 @@ func paramElems(g *flowGraph, x any) ([]jsval.Value, float64) {
 		k = 0
 	}
 	out := make([]jsval.Value, k)
+	at := paramIndexer(x)
 	for i := range out {
 		g.work(1)
-		out[i] = paramElem(x, i)
+		out[i], _ = paramValueOf(at(i))
 	}
 	return out, n
 }

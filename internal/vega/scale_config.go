@@ -912,11 +912,18 @@ func pieceValues(g *flowGraph, v jsval.Value) []jsval.Value {
 	}
 	g.chargeList(int64(n) + 1)
 	out := make([]jsval.Value, int(n)+1)
+	at := func(i int) jsval.Value { return jsval.Member(v, strconv.Itoa(i)) }
+	if v.IsStr() {
+		// A string's code units, decoded once: values[i] read on its own
+		// walks the string from its start, which made the loop quadratic.
+		units, _ := jsval.ToArrayLike(v)
+		at = func(i int) jsval.Value { return units.At(int64(i)) }
+	}
 	for i := range out {
 		if i&(rowBatch-1) == 0 && i > 0 {
 			g.work(rowBatch)
 		}
-		out[i] = jsval.Member(v, strconv.Itoa(i))
+		out[i] = at(i)
 	}
 	return out
 }

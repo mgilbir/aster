@@ -48,10 +48,9 @@ func StreamObject(object jsval.Value, s Stream) {
 			streamGeometry(streamMember(object, "geometry"), s, 0)
 			return
 		case "FeatureCollection":
-			features := streamMember(object, "features")
-			n := streamLength(features)
-			for i := 0; float64(i) < n; i++ {
-				f := streamAt(features, i)
+			features := streamListOf(streamMember(object, "features"))
+			for i := 0; float64(i) < features.n; i++ {
+				f := features.at(i)
 				streamGeometry(streamMember(f, "geometry"), s, 0)
 			}
 			return
@@ -89,6 +88,33 @@ func streamLength(v jsval.Value) float64 {
 	return jsval.ToNumber(streamMember(v, "length"))
 }
 
+// streamList is a loop's `n = v.length` and `v[i]`. A string's code units
+// are decoded once, not on each read: reading s[i] on its own walks s from
+// its start, which made a long string given as coordinates quadratic.
+type streamList struct {
+	v     jsval.Value
+	n     float64
+	str   bool
+	units jsval.ArrayLike
+}
+
+func streamListOf(v jsval.Value) streamList {
+	l := streamList{v: v, n: streamLength(v)}
+	if v.IsStr() {
+		l.str = true
+		l.units, _ = jsval.ToArrayLike(v)
+	}
+	return l
+}
+
+// at is `v[i]`.
+func (l *streamList) at(i int) jsval.Value {
+	if l.str {
+		return l.units.At(int64(i))
+	}
+	return streamAt(l.v, i)
+}
+
 // typeOf is the key `streamGeometryType.hasOwnProperty(type)` looks up: the
 // type's property key, "" for undefined (which names no geometry).
 func typeOf(t jsval.Value) string {
@@ -113,35 +139,31 @@ func streamGeometry(g jsval.Value, s Stream, depth int) {
 	case "Point":
 		streamPoint(streamMember(g, "coordinates"), s)
 	case "MultiPoint":
-		coords := streamMember(g, "coordinates")
-		n := streamLength(coords)
-		for i := 0; float64(i) < n; i++ {
-			streamPoint(streamAt(coords, i), s)
+		coords := streamListOf(streamMember(g, "coordinates"))
+		for i := 0; float64(i) < coords.n; i++ {
+			streamPoint(coords.at(i), s)
 		}
 	case "LineString":
 		streamLine(streamMember(g, "coordinates"), s, 0)
 	case "MultiLineString":
-		coords := streamMember(g, "coordinates")
-		n := streamLength(coords)
-		for i := 0; float64(i) < n; i++ {
-			streamLine(streamAt(coords, i), s, 0)
+		coords := streamListOf(streamMember(g, "coordinates"))
+		for i := 0; float64(i) < coords.n; i++ {
+			streamLine(coords.at(i), s, 0)
 		}
 	case "Polygon":
 		streamPolygon(streamMember(g, "coordinates"), s)
 	case "MultiPolygon":
-		coords := streamMember(g, "coordinates")
-		n := streamLength(coords)
-		for i := 0; float64(i) < n; i++ {
-			streamPolygon(streamAt(coords, i), s)
+		coords := streamListOf(streamMember(g, "coordinates"))
+		for i := 0; float64(i) < coords.n; i++ {
+			streamPolygon(coords.at(i), s)
 		}
 	case "GeometryCollection":
-		geoms := streamMember(g, "geometries")
-		n := streamLength(geoms)
+		geoms := streamListOf(streamMember(g, "geometries"))
 		if depth >= maxGeometryDepth {
 			return
 		}
-		for i := 0; float64(i) < n; i++ {
-			streamGeometry(streamAt(geoms, i), s, depth+1)
+		for i := 0; float64(i) < geoms.n; i++ {
+			streamGeometry(geoms.at(i), s, depth+1)
 		}
 	}
 }
@@ -199,19 +221,20 @@ func streamPoint(c jsval.Value, s Stream) {
 // streamLine is streamLine(coordinates, stream, closed): `n =
 // coordinates.length - closed` points, each `coordinates[i]`.
 func streamLine(coords jsval.Value, s Stream, closed int) {
-	n := streamLength(coords) - float64(closed)
+	l := streamListOf(coords)
+	n := l.n - float64(closed)
 	s.LineStart()
 	for i := 0; float64(i) < n; i++ {
-		streamPoint(streamAt(coords, i), s)
+		streamPoint(l.at(i), s)
 	}
 	s.LineEnd()
 }
 
 func streamPolygon(coords jsval.Value, s Stream) {
-	n := streamLength(coords)
+	l := streamListOf(coords)
 	s.PolygonStart()
-	for i := 0; float64(i) < n; i++ {
-		streamLine(streamAt(coords, i), s, 1)
+	for i := 0; float64(i) < l.n; i++ {
+		streamLine(l.at(i), s, 1)
 	}
 	s.PolygonEnd()
 }

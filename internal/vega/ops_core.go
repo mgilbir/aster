@@ -841,10 +841,6 @@ func (s *tidSet) add(o *jsval.Object) bool {
 }
 
 func facLoad(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
-	// A load without a format is a scale's domain data fed from a signal,
-	// which upstream sets with setdata(name, value): a change set inserting
-	// array(value), with no reader.
-	setdata := e.params == nil || !e.params.has("format")
 	return []jsval.Value(nil), trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 		format := p.Value("format")
 		data := func() []jsval.Value {
@@ -852,13 +848,6 @@ func facLoad(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *
 			// to the parse that makes the new ones.
 			bud := c.view.bud
 			defer bud.Replacing(bud.Replacing(n.srcRecord()))
-			if setdata {
-				rows := insertRows(p.Value("values"))
-				if c.view.nullRow(rows) >= 0 {
-					failErr(errNullRow)
-				}
-				return rows
-			}
 			// `if (_.values)`: a falsy value loads the url.
 			if v := p.Value("values"); v.IsTruthy() {
 				return c.view.loadValues(v, format)
@@ -869,13 +858,12 @@ func facLoad(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *
 		// returns: an object or an array becomes a tuple in place, and a
 		// primitive (null, the text of a body that failed to parse) stays
 		// the primitive it is in the pulse, a datum with no fields (a write
-		// into it throws, jsval.FieldsFor). setdata's change set inserts
-		// what ingest returns, a primitive wrapped as {data: value}.
+		// into it throws, jsval.FieldsFor).
 		c.view.holdSrcRows(n, data)
 		var cl jsval.Cloner
 		for i := range data {
 			c.view.work(1)
-			if setdata || data[i].IsObj() || data[i].IsArr() {
+			if data[i].IsObj() || data[i].IsArr() {
 				data[i] = ingestTupleWith(&cl, data[i])
 			}
 		}

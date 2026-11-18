@@ -326,3 +326,83 @@ func FuzzPath(f *testing.F) {
 		}
 	})
 }
+
+// TestStringListsStreamOnce: a list a geometry streams may be a string, read
+// as JavaScript reads one, a code unit per index. Each read of s[i] on its
+// own walks s from its start, so a loop over a long string was quadratic:
+// the nightly FuzzPath found a 20 KB polygon ring taking 0.3 s (over 5 s
+// under the fuzzer). Every list a stream loops over is read once instead.
+// At this length a quadratic loop takes minutes, a linear one milliseconds.
+func TestStringListsStreamOnce(t *testing.T) {
+	long := jsval.Str(strings.Repeat("aé", 1<<18)) // 2^19 code units, not ASCII
+	geoms := map[string]jsval.Value{
+		"FeatureCollection":  jsval.Obj(jsval.ObjectOf("type", jsval.Str("FeatureCollection"), "features", long)),
+		"MultiPoint":         jsval.Obj(jsval.ObjectOf("type", jsval.Str("MultiPoint"), "coordinates", long)),
+		"LineString":         jsval.Obj(jsval.ObjectOf("type", jsval.Str("LineString"), "coordinates", long)),
+		"MultiLineString":    jsval.Obj(jsval.ObjectOf("type", jsval.Str("MultiLineString"), "coordinates", long)),
+		"Polygon":            jsval.Obj(jsval.ObjectOf("type", jsval.Str("Polygon"), "coordinates", long)),
+		"PolygonRing":        jsval.Obj(jsval.ObjectOf("type", jsval.Str("Polygon"), "coordinates", jsval.ArrOf(long))),
+		"MultiPolygon":       jsval.Obj(jsval.ObjectOf("type", jsval.Str("MultiPolygon"), "coordinates", long)),
+		"GeometryCollection": jsval.Obj(jsval.ObjectOf("type", jsval.Str("GeometryCollection"), "geometries", long)),
+	}
+	for name, g := range geoms {
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			jsThrows(func() { boundsOf(g) })
+		}()
+		select {
+		case <-done:
+		case <-time.After(testutil.Scaled(60 * time.Second)): // hang guard, not a calibrated bound
+			t.Fatalf("%s: a list given as a long string takes over %v", name, testutil.Scaled(60*time.Second))
+		}
+	}
+}
+
+// TestTopologyStringsReadOnce: topojson-client indexes whatever a topology
+// holds, and a string is read a code unit per index. The arcs given as a
+// long string, looked up once per reference, and an arc given as one,
+// looped over, were each quadratic; every string a call reads by index is
+// decoded once. At these lengths a quadratic read takes minutes, a linear
+// one well under a second.
+func TestTopologyStringsReadOnce(t *testing.T) {
+	const n = 1 << 19
+	long := jsval.Str(strings.Repeat("aé", n/2)) // n code units, not ASCII
+	refs := make([]jsval.Value, n)
+	for i := range refs {
+		refs[i] = jsval.Int(i)
+	}
+	line := func(arcs jsval.Value) jsval.Value {
+		return jsval.Obj(jsval.ObjectOf("type", jsval.Str("LineString"), "arcs", arcs))
+	}
+	topo := func(arcs, object jsval.Value) jsval.Value {
+		return jsval.Obj(jsval.ObjectOf("type", jsval.Str("Topology"), "arcs", arcs,
+			"objects", jsval.Obj(jsval.ObjectOf("o", object))))
+	}
+	cases := []struct {
+		name string
+		topo jsval.Value
+		mesh bool
+	}{
+		{"arcs-string-feature", topo(long, line(jsval.ArrOf(refs...))), false},
+		{"arc-string-feature", topo(jsval.ArrOf(long), line(jsval.ArrOf(jsval.Int(0)))), false},
+		{"arc-string-mesh", topo(jsval.ArrOf(long), line(jsval.ArrOf(jsval.Int(0)))), true},
+	}
+	for _, c := range cases {
+		o := c.topo.Get("objects").Get("o")
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			if c.mesh {
+				_, _ = TopoMesh(bg, c.topo, o, MeshAll)
+			} else {
+				_, _ = TopoFeature(bg, c.topo, o)
+			}
+		}()
+		select {
+		case <-done:
+		case <-time.After(testutil.Scaled(60 * time.Second)): // hang guard, not a calibrated bound
+			t.Fatalf("%s: a topology string read by index takes over %v", c.name, testutil.Scaled(60*time.Second))
+		}
+	}
+}
