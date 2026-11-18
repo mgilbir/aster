@@ -227,3 +227,56 @@ func TestMutatedSpecs(t *testing.T) {
 		}()
 	}
 }
+
+// TestStringParamListsReadOnce: a transform parameter read as a list
+// (`steps`, `divide`, `thresholds`, ...) may be a string a signal holds,
+// whose elements are its code units. Each read of one decoded the whole
+// string, which made the list's loop quadratic (a bin's steps of 32,768
+// characters took 6.4 s); the string is decoded once. At this length a
+// quadratic loop takes half an hour, a linear one milliseconds.
+func TestStringParamListsReadOnce(t *testing.T) {
+	s := strings.Repeat("é", 1<<19)
+	for _, param := range []string{"steps", "divide"} {
+		spec := fmt.Sprintf(`{"signals":[{"name":"s","value":%q}],"data":[{"name":"a","values":[{"k":1}],
+			"transform":[{"type":"bin","field":"k","extent":[0,10],%q:{"signal":"s"}}]}],
+			"marks":[{"type":"rect","from":{"data":"a"}}]}`, s, param)
+		done := make(chan error)
+		go func() {
+			_, _, err := renderReporting(t, spec)
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("%s: %v", param, err)
+			}
+		case <-time.After(testutil.Scaled(60 * time.Second)): // hang guard, not a calibrated bound
+			t.Fatalf("%s: a list parameter given as a long string takes over %v", param, testutil.Scaled(60*time.Second))
+		}
+	}
+}
+
+// TestStringColorRangeReadOnce: an interpolating scale's range interpolates
+// through the colours it lists, d3's piecewise reading `values[i]`; a range
+// a signal gives as a string lists its code units. Each read walked the
+// string from its start, which made the loop quadratic (32,768 characters
+// took 1.7 s); the string is decoded once. At this length a quadratic loop
+// takes minutes, a linear one milliseconds.
+func TestStringColorRangeReadOnce(t *testing.T) {
+	spec := fmt.Sprintf(`{"signals":[{"name":"s","value":%q}],
+		"scales":[{"name":"c","type":"sequential","domain":[0,1],"range":{"signal":"s"}}],
+		"marks":[{"type":"rect","encode":{"enter":{"fill":{"scale":"c","value":0.5}}}}]}`, strings.Repeat("é", 1<<19))
+	done := make(chan error)
+	go func() {
+		_, _, err := renderReporting(t, spec)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(testutil.Scaled(60 * time.Second)): // hang guard, not a calibrated bound
+		t.Fatalf("a colour range given as a long string takes over %v", testutil.Scaled(60*time.Second))
+	}
+}

@@ -748,9 +748,10 @@ func measures(g *flowGraph, p *opParams, hasData bool) []transforms.Measure {
 	}
 	n := paramBound(jsval.ToNumber(nv))
 	out := make([]transforms.Measure, 0, min(n, 64))
+	fieldAt, opAt, apAt, asAt := paramIndexer(fields), paramIndexer(ops), paramIndexer(aps), paramIndexer(as)
 	for i := 0; i < n; i++ {
 		g.work(1)
-		if m := measureOf(p, paramAt(fields, i), paramAt(ops, i), paramAt(aps, i), paramAt(as, i), hasData); m.Op != "" {
+		if m := measureOf(p, fieldAt(i), opAt(i), apAt(i), asAt(i), hasData); m.Op != "" {
 			out = append(out, m)
 		}
 	}
@@ -1005,17 +1006,19 @@ func lookupParams(g *flowGraph, p *opParams, idx *transforms.LookupIndex) transf
 	}
 	n := paramBound(paramLength(keys))
 	lp.Fields = make([]transforms.Field, n)
+	keyAt := paramIndexer(keys)
 	for i := range lp.Fields {
 		g.work(1)
-		lp.Fields[i] = accessorOf(paramAt(keys, i))
+		lp.Fields[i] = accessorOf(keyAt(i))
 	}
 	asx := p.Get("as")
 	asGiven := paramTruthy(asx)
 	names := func(count int) {
 		lp.As = make([]string, count)
+		asAt := paramIndexer(asx)
 		for k := range lp.As {
 			g.work(1)
-			v, _ := paramValueOf(paramAt(asx, k))
+			v, _ := paramValueOf(asAt(k))
 			lp.As[k] = p.walk.String(v)
 		}
 	}
@@ -1023,9 +1026,10 @@ func lookupParams(g *flowGraph, p *opParams, idx *transforms.LookupIndex) transf
 		lp.ValuesGiven = true
 		m := paramBound(paramLength(vx))
 		lp.Values = make([]transforms.Field, m)
+		valueAt := paramIndexer(vx)
 		for j := range lp.Values {
 			g.work(1)
-			lp.Values[j] = accessorOf(paramAt(vx, j))
+			lp.Values[j] = accessorOf(valueAt(j))
 		}
 		if n > 1 && !asGiven {
 			fail(`Multi-field lookup requires explicit "as" parameter.`)

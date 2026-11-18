@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"unsafe"
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
@@ -103,6 +104,69 @@ type topology struct {
 	// topojson-client's arithmetic concatenates them or uses them as keys.
 	walk jsval.Walker
 	dec  *decoder
+	// strs are the strings read by index or length, decoded once each: a
+	// string's s[i] read on its own walks s from its start, so the loops
+	// over a string given as arcs, an arc or a position, and the arc
+	// lookups into a string given as the topology's arcs, were quadratic.
+	strs map[strKey]*jsval.ArrayLike
+}
+
+// strKey names a string by its bytes' address and length: strings are
+// immutable, and the cache holds each one it names, so no other string
+// takes its address while the call runs.
+type strKey struct {
+	p *byte
+	n int
+}
+
+// units is the string v's code units, decoded on the first read.
+func (t *topology) units(v jsval.Value) *jsval.ArrayLike {
+	s := v.StrValue()
+	k := strKey{unsafe.StringData(s), len(s)}
+	if a, ok := t.strs[k]; ok {
+		return a
+	}
+	// At most two bytes a unit, a unit for each byte.
+	t.mustCharge(2*int64(len(s))+topoSlotBytes, int64(len(s))/64+1)
+	a, _ := jsval.ToArrayLike(v)
+	if t.strs == nil {
+		t.strs = map[strKey]*jsval.ArrayLike{}
+	}
+	t.strs[k] = &a
+	return &a
+}
+
+// at is `v[k]` of an index k: an array's element directly, a string's code
+// unit, else member.
+func (t *topology) at(v jsval.Value, k int) jsval.Value {
+	switch {
+	case v.IsArr():
+		return v.Index(k)
+	case v.IsStr():
+		return t.units(v).At(int64(k))
+	}
+	return member(v, strconv.Itoa(k))
+}
+
+// length is `v.length`.
+func (t *topology) length(v jsval.Value) jsval.Value {
+	if v.IsStr() {
+		return jsval.Int(int(t.units(v).Len()))
+	}
+	return member(v, "length")
+}
+
+// memberKey is `v[key]`, a string's index and length read as at and length.
+func (t *topology) memberKey(v jsval.Value, key string) jsval.Value {
+	if v.IsStr() {
+		if key == "length" {
+			return t.length(v)
+		}
+		if k, ok := jsval.ArrayIndex(key); ok {
+			return t.units(v).At(int64(k))
+		}
+	}
+	return member(v, key)
 }
 
 func newTopology(ctx context.Context, t jsval.Value) *topology {
@@ -171,14 +235,6 @@ func elements(v jsval.Value, expr, method string) []jsval.Value {
 	return nil
 }
 
-// at is `v[k]` of an index k: an array's element directly, else member.
-func at(v jsval.Value, k int) jsval.Value {
-	if v.IsArr() {
-		return v.Index(k)
-	}
-	return member(v, strconv.Itoa(k))
-}
-
 // arcRef is `arcs[i < 0 ? ~i : i]`: for an integer reference into an array of
 // arcs, the element, without making its key.
 func (t *topology) arcRef(arcs, i jsval.Value) jsval.Value {
@@ -191,7 +247,7 @@ func (t *topology) arcRef(arcs, i jsval.Value) jsval.Value {
 			return arcs.Index(j)
 		}
 	}
-	return member(arcs, t.arcKey(i))
+	return t.memberKey(arcs, t.arcKey(i))
 }
 
 // key is the property key of a value: String(v).
@@ -286,7 +342,7 @@ func (p *pointTransform) apply(input jsval.Value, reset bool) jsval.Value {
 	size := 1
 	if input.IsArr() {
 		size = input.Len()
-	} else if n := member(input, "length"); n.IsNum() {
+	} else if n := t.length(input); n.IsNum() {
 		f := n.NumValue()
 		if f < 0 || f != math.Trunc(f) || f >= 1<<32 {
 			topoThrowf("Invalid array length")
@@ -296,7 +352,7 @@ func (p *pointTransform) apply(input jsval.Value, reset bool) jsval.Value {
 	length := max(size, 2)
 	t.mustCharge(topoSlotBytes+topoArrBytes+budget.Mul(int64(length), topoValBytes), int64(length)+1)
 	arr, out := jsval.MakeArr(length)
-	if err := p.x0.add(at(input, 0), t); err != nil {
+	if err := p.x0.add(t.at(input, 0), t); err != nil {
 		panic(topoThrow{err})
 	}
 	v, err := jsScaleAdd(&p.x0, p.kx, p.dx, t)
@@ -304,7 +360,7 @@ func (p *pointTransform) apply(input jsval.Value, reset bool) jsval.Value {
 		panic(topoThrow{err})
 	}
 	out[0] = v
-	if err := p.y0.add(at(input, 1), t); err != nil {
+	if err := p.y0.add(t.at(input, 1), t); err != nil {
 		panic(topoThrow{err})
 	}
 	if out[1], err = jsScaleAdd(&p.y0, p.ky, p.dy, t); err != nil {
@@ -312,7 +368,7 @@ func (p *pointTransform) apply(input jsval.Value, reset bool) jsval.Value {
 	}
 	// `while (j < n) output[j] = input[j], ++j`, for a number n.
 	for j := 2; j < size; j++ {
-		out[j] = at(input, j)
+		out[j] = t.at(input, j)
 	}
 	return arr
 }
@@ -345,7 +401,7 @@ func (d *decoder) arcInto(i jsval.Value, points []jsval.Value) []jsval.Value {
 		points = points[:len(points)-1]
 	}
 	a := d.t.arcRef(d.arcs, i)
-	n := member(a, "length")
+	n := d.t.length(a)
 	if a.IsArr() {
 		// The line grows by the arc at once, as an append of it would.
 		points = slices.Grow(points, len(a.Items()))
@@ -355,7 +411,7 @@ func (d *decoder) arcInto(i jsval.Value, points []jsval.Value) []jsval.Value {
 	} else {
 		bound := jsval.ToNumber(n)
 		for k := 0; float64(k) < bound; k++ {
-			points = append(points, d.tp.apply(at(a, k), k == 0))
+			points = append(points, d.tp.apply(d.t.at(a, k), k == 0))
 		}
 	}
 	if less0(i) {
@@ -400,10 +456,10 @@ func (d *decoder) line(arcs jsval.Value) jsval.Value {
 		return d.lineOf(arcs.Items())
 	}
 	var points []jsval.Value
-	n := jsval.ToNumber(member(arcs, "length"))
+	n := jsval.ToNumber(d.t.length(arcs))
 	for i := 0; float64(i) < n; i++ {
 		d.t.mustCharge(0, 1)
-		points = d.arcInto(at(arcs, i), points)
+		points = d.arcInto(d.t.at(arcs, i), points)
 	}
 	return jsval.Arr(padLine(points))
 }
@@ -840,9 +896,9 @@ func (t *topology) stitch(arcs []jsval.Value) [][]jsval.Value {
 		t.mustCharge(0, 1)
 		i := arcs[j]
 		arc := t.arcAt(i)
-		if jsval.ToNumber(member(arc, "length")) < 3 {
-			p := at(arc, 1)
-			if !at(p, 0).IsTruthy() && !at(p, 1).IsTruthy() {
+		if jsval.ToNumber(t.length(arc)) < 3 {
+			p := t.at(arc, 1)
+			if !t.at(p, 0).IsTruthy() && !t.at(p, 1).IsTruthy() {
 				emptyIndex++
 				arcs[emptyIndex], arcs[j] = i, arcs[emptyIndex]
 			}
@@ -851,24 +907,24 @@ func (t *topology) stitch(arcs []jsval.Value) [][]jsval.Value {
 
 	ends := func(i jsval.Value) (string, string) {
 		arc := t.arcAt(i)
-		p0 := at(arc, 0)
+		p0 := t.at(arc, 0)
 		var p1 string
 		if member(t.val, "transform").IsTruthy() {
 			var x, y jsSum
 			defer x.release(t)
 			defer y.release(t)
 			for _, dp := range elements(arc, "arc", "forEach") {
-				if err := x.add(at(dp, 0), t); err != nil {
+				if err := x.add(t.at(dp, 0), t); err != nil {
 					panic(topoThrow{err})
 				}
-				if err := y.add(at(dp, 1), t); err != nil {
+				if err := y.add(t.at(dp, 1), t); err != nil {
 					panic(topoThrow{err})
 				}
 			}
 			p1 = x.String() + "," + y.String()
 		} else {
-			last := jsval.ToNumber(member(arc, "length")) - 1
-			p1 = t.key(member(arc, t.walk.String(jsval.Num(last))))
+			last := jsval.ToNumber(t.length(arc)) - 1
+			p1 = t.key(t.memberKey(arc, t.walk.String(jsval.Num(last))))
 		}
 		s0 := t.key(p0)
 		if less0(i) {

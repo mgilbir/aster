@@ -316,8 +316,9 @@ func interpolateArray(w jsval.Walker, m *jsval.WalkMeter, a, b jsval.Value, dept
 	w.Work(int64(n))
 	w.Keep(int64(n) * funcBytes)
 	x := make([]func(float64) jsval.Value, n)
+	ea, eb := elems(a), elems(b)
 	for i := 0; i < n; i++ {
-		x[i] = interpolateValue(w, m, member(a, i), member(b, i), depth+1)
+		x[i] = interpolateValue(w, m, ea(i), eb(i), depth+1)
 	}
 	// for (; i < nb; ++i) c[i] = b[i]
 	if hi := jsval.ToNumber(nb); hi > float64(n) {
@@ -328,7 +329,7 @@ func interpolateArray(w jsval.Walker, m *jsval.WalkMeter, a, b jsval.Value, dept
 			c0 = setAt(c0, int(top)-1, jsval.Undefined)
 		}
 		for i := n; float64(i) < hi && i < len(c0); i++ {
-			c0[i] = member(b, i)
+			c0[i] = eb(i)
 		}
 	}
 	if len(c0) < n {
@@ -364,14 +365,16 @@ func lengthValue(v jsval.Value) jsval.Value {
 	return jsval.Undefined
 }
 
-// member is v[i]: an array's element, a string's i-th UTF-16 unit, an
-// object's member "i", undefined for the rest.
-func member(v jsval.Value, i int) jsval.Value {
+// elems is v[i] for a loop over i: an array's element, a string's i-th
+// UTF-16 unit, an object's member "i", undefined for the rest. A string is
+// decoded once, not at each read (which made a loop over one quadratic).
+func elems(v jsval.Value) func(i int) jsval.Value {
 	if v.IsObj() {
-		return v.ObjValue().Lookup(strconv.Itoa(i))
+		o := v.ObjValue()
+		return func(i int) jsval.Value { return o.Lookup(strconv.Itoa(i)) }
 	}
 	al, _ := jsval.ToArrayLike(v)
-	return al.At(int64(i))
+	return func(i int) jsval.Value { return al.At(int64(i)) }
 }
 
 // validArrayLength is whether new Array(n) accepts the number n.
