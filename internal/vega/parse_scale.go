@@ -178,10 +178,14 @@ func domainFieldRef(data jsval.Value, scope *Scope) jsval.Value {
 		coll.ingest = &ingestSpec{values: data}
 		scope.addDataPipeline(name, []*entry{coll, mk("sieve")})
 	} else {
-		// Upstream feeds the set with `setdata(name, values)` whenever a
-		// signal changes: values is the signal, or an array literal written
-		// from the array's entries (a signal's source, any other entry as
-		// JSON); a loader that reads that value does the same.
+		// Upstream feeds the set with the expression
+		// 'setdata(' + name + ',' + values + ')', the collect's `input`,
+		// evaluated whenever a signal it reads changes: values is the
+		// signal, or an array literal written from the array's entries (a
+		// signal's source, any other entry as JSON). The source is spliced
+		// in as text, not parsed on its own: a signal [1,2] is the text
+		// "1,2", a second argument setdata ignores, and a source that closes
+		// the call ("1) + (2") calls setdata inside a larger expression.
 		code := specText(specGet(data, "signal"))
 		if data.IsArr() {
 			var b strings.Builder
@@ -200,8 +204,9 @@ func domainFieldRef(data jsval.Value, scope *Scope) jsval.Value {
 			b.WriteByte(']')
 			code = b.String()
 		}
-		load := mk("load", "values", scope.signalRef(code))
-		scope.addDataPipeline(name, []*entry{load, mk("collect"), mk("sieve")})
+		code = "setdata(" + stringValue(sv(name)) + "," + code + ")"
+		coll := mk("collect", "input", scope.signalRef(code))
+		scope.addDataPipeline(name, []*entry{coll, mk("sieve")})
 	}
 	return obj("data", sv(name), "field", sv("data"))
 }

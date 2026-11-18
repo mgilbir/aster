@@ -1,6 +1,7 @@
 package vega
 
 import (
+	"context"
 	"testing"
 
 	"github.com/mgilbir/aster/internal/jsval"
@@ -37,13 +38,21 @@ func TestNestedReferencesAreCanonical(t *testing.T) {
 		`{"scale":{"datum":{}},"value":1}`,
 		`{"scale":{},"value":1}`,
 		`{"scale":["s"],"value":1}`,
+		// Spliced as text into a source they close a parenthesis or
+		// bracket of: only the source reads them as upstream does.
+		`{"signal":"1) + (2"}`,
+		`{"scale":{"signal":"'s') + ('"},"value":1}`,
+		`{"field":{"signal":"'a']+datum['b'"}}`,
+		`{"field":{"datum":{"signal":"'a']+datum['b'"}}}`,
+		`{"value":1,"mult":{"signal":"2) * (3"}}`,
 	}
+	c := &encCompiler{scope: newScope(jsval.Undefined, &parseOptions{ctx: context.Background()})}
 	for _, s := range accepted {
 		v, err := jsval.ParseJSON([]byte(s))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !canonicalEntry(v, 0) {
+		if !c.canonicalEntry(v, 0) {
 			t.Errorf("%s: refused", s)
 		}
 	}
@@ -52,7 +61,7 @@ func TestNestedReferencesAreCanonical(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if canonicalEntry(v, 0) {
+		if c.canonicalEntry(v, 0) {
 			t.Errorf("%s: accepted", s)
 		}
 	}
