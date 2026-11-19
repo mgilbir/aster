@@ -359,7 +359,7 @@ func (v *runView) readTopoJSONFormat(value jsval.Value, raw []byte, schema jsval
 	var out jsval.Value
 	var err error
 	if useMesh {
-		out, err = geo.TopoMeshJS(v.ctx, ld.data, object, v.meshFilter(filter))
+		out, err = geo.TopoMeshJS(v.ctx, ld.data, object, v.meshFilter(filter), &v.arrayProto)
 	} else {
 		out, err = geo.TopoFeatureJS(v.ctx, ld.data, object)
 	}
@@ -399,7 +399,7 @@ func (v *runView) meshFilter(name jsval.Value) geo.MeshFilterJS {
 	case "constructor", "toString":
 		// Object(g) and Object.prototype.toString() are truthy for every
 		// geometry: every arc is kept.
-		return geo.MeshFilterJS{}
+		return geo.MeshFilterJS{Called: true}
 	}
 	if _, ok := jsval.Inherited(k); ok {
 		// Called as a plain function, with this undefined: ToObject(this)

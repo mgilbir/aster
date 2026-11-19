@@ -214,7 +214,10 @@ type Result struct {
 type runView struct {
 	// measure is the module state of d3-geo's measures (see geoState).
 	measure *geo.MeasureState
-	ctx     context.Context
+	// arrayProto is what this run's TopoJSON meshes pushed onto
+	// Array.prototype (geo.ArrayProto).
+	arrayProto geo.ArrayProto
+	ctx        context.Context
 	// walk walks the values of the run: their String, JSON and deep
 	// comparisons are bounded by the call (jsval.Walker, ADR 0018).
 	walk jsval.Walker
