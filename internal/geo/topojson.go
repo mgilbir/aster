@@ -59,6 +59,10 @@ func ParseMeshFilter(name string) MeshFilter {
 type MeshFilterJS struct {
 	Kind   MeshFilter
 	Throws string
+	// Called is a filter that keeps every arc but is a function all the
+	// same (Object, Object.prototype.toString): mesh calls it, where for
+	// none it reads the arc's first use directly.
+	Called bool
 }
 
 // maxTopoDepth bounds GeometryCollection nesting in TopoJSON input.
@@ -618,13 +622,27 @@ func TopoFeatureJS(ctx context.Context, topo, o jsval.Value) (out jsval.Value, e
 	return t.feature(o), nil
 }
 
+// ArrayProto is what the mesh calls of one render pushed onto
+// Array.prototype: an arc reference named "__proto__" pushes itself there
+// (geomsByArc["__proto__"].push), and every later geomsByArc, of that call
+// or another, inherits the elements where it has none of its own. Upstream's
+// stay for the process; the engine's for the render (ADR 0013), whose other
+// reads of them are not modelled.
+type ArrayProto struct {
+	n uint32 // Array.prototype.length
+}
+
 // TopoMeshJS is topojson.mesh(topology, object, filter): one MultiLineString
 // of the object's arcs, stitched, those the filter keeps when it has one.
-// It is bounded by ctx as TopoFeatureJS is.
-func TopoMeshJS(ctx context.Context, topo, o jsval.Value, filter MeshFilterJS) (out jsval.Value, err error) {
+// It is bounded by ctx as TopoFeatureJS is. proto is the render's
+// Array.prototype; nil is a fresh one.
+func TopoMeshJS(ctx context.Context, topo, o jsval.Value, filter MeshFilterJS, proto *ArrayProto) (out jsval.Value, err error) {
 	defer topoCatch(&err)
 	t := newTopology(ctx, topo)
-	arcs := t.extractArcs(o, filter)
+	if proto == nil {
+		proto = &ArrayProto{}
+	}
+	arcs := t.extractArcs(o, filter, proto)
 	frags := t.stitch(arcs)
 	// object(topology, {type: "MultiLineString", arcs: fragments}):
 	// `o.arcs.map(line)` of the fragments, arrays the stitch made, decoded
@@ -645,7 +663,7 @@ func TopoFeature(ctx context.Context, topo, object jsval.Value) (jsval.Value, er
 
 // TopoMesh is TopoMeshJS with one of vega-loader's filters.
 func TopoMesh(ctx context.Context, topo, object jsval.Value, filter MeshFilter) (jsval.Value, error) {
-	return TopoMeshJS(ctx, topo, object, MeshFilterJS{Kind: filter})
+	return TopoMeshJS(ctx, topo, object, MeshFilterJS{Kind: filter}, nil)
 }
 
 // arcUse is what extractArcs keeps of geomsByArc[j]: the first reference
@@ -662,7 +680,7 @@ type arcUse struct {
 // array index keeps where forEach visits it), then, in index order, the
 // first reference of each arc the filter keeps (comparing the first and the
 // last geometry that use it, by identity).
-func (t *topology) extractArcs(object jsval.Value, filter MeshFilterJS) []jsval.Value {
+func (t *topology) extractArcs(object jsval.Value, filter MeshFilterJS, proto *ArrayProto) []jsval.Value {
 	// The use of arc j is uses[dense[j]-1], or for an index far past the
 	// others uses[sparse[j]].
 	var dense []int32
@@ -695,6 +713,13 @@ func (t *topology) extractArcs(object jsval.Value, filter MeshFilterJS) []jsval.
 			if key == "length" {
 				topoThrowf("TypeError: (geomsByArc[j] || (geomsByArc[j] = [])).push is not a function")
 			}
+			if key == "__proto__" {
+				// geomsByArc["__proto__"] is Array.prototype, itself an
+				// array with a push: the reference becomes its next element,
+				// which every array without an own element there inherits.
+				proto.n++
+				return
+			}
 			if m := jsval.Member(jsval.Arr(nil), key); !m.IsUndefined() && m.IsTruthy() {
 				topoThrowf("TypeError: (geomsByArc[j] || (geomsByArc[j] = [])).push is not a function")
 			}
@@ -707,6 +732,11 @@ func (t *topology) extractArcs(object jsval.Value, filter MeshFilterJS) []jsval.
 		if k, seen := sparse[j]; seen {
 			uses[k].last = geom
 			return
+		}
+		if j < proto.n {
+			// geomsByArc[j] inherits a reference pushed onto
+			// Array.prototype: an object, truthy, without a push.
+			topoThrowf("TypeError: (geomsByArc[j] || (geomsByArc[j] = [])).push is not a function")
 		}
 		if int64(j) <= 4*int64(len(uses))+1024 {
 			if int(j) >= len(dense) {
@@ -767,11 +797,22 @@ func (t *topology) extractArcs(object jsval.Value, filter MeshFilterJS) []jsval.
 		}
 	}
 	var arcs []jsval.Value
+	// next is the first index forEach has not visited: a hole before an
+	// arc's index that Array.prototype has an element at is visited too,
+	// that element (an object, no list of uses) read as geoms.
+	var next uint32
 	for _, k := range dense {
 		if k == 0 {
 			continue
 		}
 		u := &uses[k-1]
+		if next < u.j && next < proto.n {
+			if filter.Kind != MeshAll || filter.Throws != "" || filter.Called {
+				topoThrowf("TypeError: Cannot read properties of undefined (reading 'g')")
+			}
+			topoThrowf("TypeError: Cannot read properties of undefined (reading 'i')")
+		}
+		next = u.j + 1
 		first, last := u.first, u.last
 		switch {
 		case filter.Throws != "":
@@ -1047,7 +1088,7 @@ func TopologyFeatures(ctx context.Context, topo jsval.Value, feature, mesh, filt
 	if feature != "" {
 		out, err = TopoFeatureJS(ctx, topo, object)
 	} else {
-		out, err = TopoMeshJS(ctx, topo, object, MeshFilterJS{Kind: ParseMeshFilter(filter)})
+		out, err = TopoMeshJS(ctx, topo, object, MeshFilterJS{Kind: ParseMeshFilter(filter)}, nil)
 	}
 	if err != nil {
 		return nil, err
