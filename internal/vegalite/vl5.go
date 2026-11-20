@@ -19,11 +19,15 @@ func wrapCondition58(o wrapConditionOpts) Value {
 		for _, c := range arrayOf(cond) {
 			cc.work(1)
 			cvr := o.mainRefFn(c)
+			// 5.8 tests c['param'] (truthy, not hasProperty) and reads
+			// param, empty and test through c's prototype chain: a
+			// condition whose "__proto__" key the clone of the normalizer
+			// turned into its prototype inherits them.
 			var test string
-			if isConditionalParameter(c) {
-				test = parseSelectionPredicate(o.model, mkv("param", c.Get("param"), "empty", c.Get("empty")), nil, "datum")
+			if param := jsProp(c, "param"); param.IsTruthy() {
+				test = parseSelectionPredicate(o.model, mkv("param", param, "empty", jsProp(c, "empty")), nil, "datum")
 			} else {
-				test = expression(o.model.b().ctx, o.model, c.Get("test"), nil)
+				test = expression(o.model.b().ctx, o.model, jsProp(c, "test"), nil)
 			}
 			r := mk("test", test)
 			spreadV(r, cvr)
